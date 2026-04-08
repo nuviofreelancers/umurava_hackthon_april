@@ -1,0 +1,122 @@
+{
+  "name": "ScreeningResult",
+  "type": "object",
+  "properties": {
+    "job_id": {
+      "type": "string",
+      "description": "Reference to the Job"
+    },
+    "applicant_id": {
+      "type": "string",
+      "description": "Reference to the Applicant"
+    },
+    "applicant_name": {
+      "type": "string",
+      "description": "Applicant name for quick display"
+    },
+    "rank": {
+      "type": "number",
+      "description": "Position in the shortlist (1 = best match)"
+    },
+    "match_score": {
+      "type": "number",
+      "description": "Weighted composite score 0-100"
+    },
+    "skills_score": {
+      "type": "number",
+      "description": "Skills match score 0-100"
+    },
+    "experience_score": {
+      "type": "number",
+      "description": "Experience score 0-100"
+    },
+    "education_score": {
+      "type": "number",
+      "description": "Education score 0-100"
+    },
+    "relevance_score": {
+      "type": "number",
+      "description": "Role relevance score 0-100"
+    },
+    "strengths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Specific reasons candidate fits"
+    },
+    "gaps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Skills missing or experience concerns"
+    },
+    "confidence_level": {
+      "type": "string",
+      "enum": [
+        "Low",
+        "Medium",
+        "High"
+      ],
+      "description": "AI confidence based on profile completeness"
+    },
+    "recommendation": {
+      "type": "string",
+      "description": "Natural language 1-2 sentence summary"
+    },
+    "bias_flags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Any bias alerts flagged by AI"
+    },
+    "other_matching_roles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "job_title": {
+            "type": "string"
+          },
+          "estimated_score": {
+            "type": "number"
+          }
+        }
+      },
+      "description": "Other open roles this candidate might fit"
+    },
+    "candidate_feedback": {
+      "type": "string",
+      "description": "Auto-generated feedback for the candidate"
+    },
+    "screening_weights_used": {
+      "type": "object",
+      "properties": {
+        "skills": {
+          "type": "number"
+        },
+        "experience": {
+          "type": "number"
+        },
+        "education": {
+          "type": "number"
+        },
+        "relevance": {
+          "type": "number"
+        }
+      },
+      "description": "The weights that were used for this screening"
+    }
+  },
+  "required": [
+    "job_id",
+    "applicant_id",
+    "match_score",
+    "rank"
+  ]
+}

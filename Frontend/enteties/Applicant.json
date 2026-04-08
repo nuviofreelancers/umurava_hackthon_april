@@ -1,0 +1,165 @@
+{
+  "name": "Applicant",
+  "type": "object",
+  "properties": {
+    "job_id": {
+      "type": "string",
+      "description": "Reference to the Job this applicant applied for"
+    },
+    "full_name": {
+      "type": "string",
+      "description": "Candidate full name"
+    },
+    "email": {
+      "type": "string",
+      "description": "Candidate email"
+    },
+    "phone": {
+      "type": "string",
+      "description": "Candidate phone number"
+    },
+    "location": {
+      "type": "string",
+      "description": "Candidate location"
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "Umurava Platform",
+        "CSV Upload",
+        "PDF Resume",
+        "Manual Entry"
+      ],
+      "description": "How this applicant was ingested"
+    },
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "List of candidate skills"
+    },
+    "experience_years": {
+      "type": "number",
+      "description": "Total years of experience"
+    },
+    "education_level": {
+      "type": "string",
+      "enum": [
+        "None",
+        "High School",
+        "Associate",
+        "Bachelor",
+        "Master",
+        "PhD"
+      ],
+      "description": "Highest education level"
+    },
+    "education_field": {
+      "type": "string",
+      "description": "Field of study"
+    },
+    "current_role": {
+      "type": "string",
+      "description": "Current job title"
+    },
+    "current_company": {
+      "type": "string",
+      "description": "Current employer"
+    },
+    "work_history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "company": {
+            "type": "string"
+          },
+          "duration": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "Work history entries"
+    },
+    "certifications": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "List of certifications"
+    },
+    "languages": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Languages spoken"
+    },
+    "portfolio_url": {
+      "type": "string",
+      "description": "Portfolio or LinkedIn URL"
+    },
+    "resume_url": {
+      "type": "string",
+      "description": "Uploaded resume file URL"
+    },
+    "raw_resume_text": {
+      "type": "string",
+      "description": "Extracted text from resume"
+    },
+    "profile_completeness": {
+      "type": "number",
+      "description": "Profile completeness score 0-100"
+    },
+    "interview_status": {
+      "type": "string",
+      "enum": [
+        "Not Scheduled",
+        "Interview Scheduled",
+        "Interviewed",
+        "Rejected",
+        "Offer Extended"
+      ],
+      "default": "Not Scheduled",
+      "description": "Current interview status of the candidate"
+    },
+    "interview_date": {
+      "type": "string",
+      "description": "Scheduled interview date (ISO string)"
+    },
+    "interview_time": {
+      "type": "string",
+      "description": "Scheduled interview time (HH:MM)"
+    },
+    "interview_platform": {
+      "type": "string",
+      "enum": [
+        "Google Meet",
+        "Microsoft Teams",
+        "Zoom",
+        "In Person",
+        "Phone Call"
+      ],
+      "description": "Platform for the interview"
+    },
+    "interview_link": {
+      "type": "string",
+      "description": "Meeting link or address for the interview"
+    },
+    "interview_notes": {
+      "type": "string",
+      "description": "Additional notes for the interview"
+    }
+  },
+  "required": [
+    "job_id",
+    "full_name"
+  ]
+}
