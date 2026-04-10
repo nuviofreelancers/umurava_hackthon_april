@@ -1,6 +1,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { jobs as jobsApi, applicants as applicantsApi, results as resultsApi, screening } from "@/api/backend";
+import { useDispatch, useSelector } from "react-redux";
+import { fetchJob, updateJob, deleteJob } from "@/store/jobSlice";
+import { fetchApplicantsByJob } from "@/store/applicantsSlice";
+import { fetchResultsByJob, runScreening, deleteResultsByJob } from "@/store/resultsSlice";
+import { applicants as applicantsApi } from "@/api/backend";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowLeft, Edit, Users, Sparkles, Loader2, Trash2, RefreshCw } from "lucide-react";
@@ -13,62 +17,49 @@ import ShortlistView from "../components/ShortlistView";
 import ScreeningProgress from "../components/ScreeningProgress";
 
 export default function JobDetail() {
-  const { id } = useParams();
-  const navigate = useNavigate();
-  const { toast } = useToast();
-  const [job, setJob] = useState(null);
-  const [applicantsList, setApplicantsList] = useState([]);
-  const [resultsList, setResultsList] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [screeningRunning, setScreeningRunning] = useState(false);
-  const [screeningProgress, setScreeningProgress] = useState(0);
+  const { id }       = useParams();
+  const navigate     = useNavigate();
+  const dispatch     = useDispatch();
+  const { toast }    = useToast();
+
+  const job            = useSelector(s => s.jobs.selected);
+  const applicantsList = useSelector(s => s.applicants.list);
+  const resultsList    = useSelector(s => [...s.results.list].sort((a, b) => a.rank - b.rank));
+  const screeningRunning = useSelector(s => s.results.screening);
+  const screeningProgress = useSelector(s => s.results.progress);
+  const loading        = useSelector(s => s.jobs.loading);
+
   const [weights, setWeights] = useState({ skills: 40, experience: 30, education: 15, relevance: 15 });
 
-  const loadData = useCallback(async () => {
-    try {
-      const [jobData, apps, res] = await Promise.all([
-        jobsApi.get(id),
-        applicantsApi.listByJob(id),
-        resultsApi.listByJob(id),
-      ]);
-      setJob(jobData);
-      setWeights(jobData.screening_weights || { skills: 40, experience: 30, education: 15, relevance: 15 });
-      setApplicantsList(apps);
-      setResultsList(res.sort((a, b) => a.rank - b.rank));
-    } catch {
-      toast({ title: "Failed to load job", variant: "destructive" });
-    }
-    setLoading(false);
-  }, [id]);
+  const loadData = useCallback(() => {
+    dispatch(fetchJob(id));
+    dispatch(fetchApplicantsByJob(id));
+    dispatch(fetchResultsByJob(id));
+  }, [id, dispatch]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const runScreening = async () => {
+  // Sync weights from loaded job
+  useEffect(() => {
+    if (job?.screening_weights) setWeights(job.screening_weights);
+  }, [job]);
+
+  const handleRunScreening = async () => {
     if (applicantsList.length === 0) {
       toast({ title: "No applicants", description: "Add candidates before screening", variant: "destructive" });
       return;
     }
-    setScreeningRunning(true);
-    setScreeningProgress(20);
     try {
-      await jobsApi.update(id, { screening_weights: weights });
-      setScreeningProgress(40);
-      const result = await screening.run(id, weights);
-      setScreeningProgress(100);
-      toast({ title: "Screening complete", description: `${result?.count || 0} candidates ranked` });
-      setTimeout(() => {
-        setScreeningRunning(false);
-        setScreeningProgress(0);
-        loadData();
-      }, 500);
+      await dispatch(updateJob({ id, data: { screening_weights: weights } }));
+      await dispatch(runScreening({ jobId: id, weights })).unwrap();
+      toast({ title: "Screening complete" });
+      loadData();
     } catch (e) {
       toast({ title: "Screening failed", description: e.message, variant: "destructive" });
-      setScreeningRunning(false);
-      setScreeningProgress(0);
     }
   };
 
-  const deleteJob = () => {
+  const handleDeleteJob = () => {
     let undone = false;
     const { dismiss } = toast({
       title: `"${job.title}" will be deleted`,
@@ -78,33 +69,28 @@ export default function JobDetail() {
         <button
           onClick={() => { undone = true; dismiss(); }}
           className="px-3 py-1 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
-        >
-          Undo
-        </button>
+        >Undo</button>
       ),
     });
     navigate("/jobs");
     setTimeout(async () => {
       if (!undone) {
         try {
-          await resultsApi.deleteByJob(id);
-          // delete applicants one by one (backend can also support bulk delete)
+          await dispatch(deleteResultsByJob(id));
           for (const a of applicantsList) await applicantsApi.delete(a.id);
-          await jobsApi.delete(id);
+          await dispatch(deleteJob(id));
         } catch { /* silent — user already navigated away */ }
       }
     }, 30000);
   };
 
-  if (loading) {
+  if (loading || !job) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
       </div>
     );
   }
-
-  if (!job) return <p className="text-muted-foreground text-center py-16">Job not found</p>;
 
   return (
     <div className="space-y-6">
@@ -117,7 +103,7 @@ export default function JobDetail() {
             <h1 className="text-2xl font-heading font-bold">{job.title}</h1>
             <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
               {job.department && <span>{job.department}</span>}
-              {job.location && <span>· {job.location}</span>}
+              {job.location   && <span>· {job.location}</span>}
               <span>· {job.experience_level}</span>
             </div>
           </div>
@@ -128,7 +114,7 @@ export default function JobDetail() {
               <Edit className="w-3.5 h-3.5" /> Edit
             </Button>
           </Link>
-          <Button variant="outline" size="sm" className="gap-1.5 text-destructive hover:text-destructive" onClick={deleteJob}>
+          <Button variant="outline" size="sm" className="gap-1.5 text-destructive hover:text-destructive" onClick={handleDeleteJob}>
             <Trash2 className="w-3.5 h-3.5" /> Delete
           </Button>
         </div>
@@ -170,7 +156,7 @@ export default function JobDetail() {
               <div className="bg-card rounded-xl border border-border p-5">
                 <WeightSliders weights={weights} onChange={setWeights} />
                 <Button
-                  onClick={runScreening}
+                  onClick={handleRunScreening}
                   disabled={screeningRunning || applicantsList.length === 0}
                   className="w-full mt-4 bg-accent hover:bg-accent/90 text-accent-foreground gap-2"
                 >

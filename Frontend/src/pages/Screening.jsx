@@ -1,27 +1,22 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Link } from "react-router-dom";
-import { jobs as jobsApi, results as resultsApi } from "@/api/backend";
+import { useDispatch, useSelector } from "react-redux";
+import { fetchJobs } from "@/store/jobSlice";
+import { fetchResults } from "@/store/resultsSlice";
 import { Sparkles, Briefcase, ArrowRight, Clock } from "lucide-react";
 import EmptyState from "../components/EmptyState";
 import moment from "moment";
 
 export default function Screening() {
-  const [jobs, setJobs] = useState([]);
-  const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const dispatch = useDispatch();
+  const jobs    = useSelector(s => s.jobs.list);
+  const results = useSelector(s => s.results.list);
+  const loading = useSelector(s => s.jobs.loading);
 
   useEffect(() => {
-    async function load() {
-      const [j, r] = await Promise.all([
-        jobsApi.list(),
-        resultsApi.list(),
-      ]);
-      setJobs(j);
-      setResults(r);
-      setLoading(false);
-    }
-    load();
-  }, []);
+    dispatch(fetchJobs());
+    dispatch(fetchResults());
+  }, [dispatch]);
 
   const screenedJobs = jobs.filter(j => j.last_screened_at);
 
@@ -41,7 +36,7 @@ export default function Screening() {
       </div>
 
       {screenedJobs.length === 0 ? (
-        <EmptyState 
+        <EmptyState
           icon={Sparkles}
           title="No screenings yet"
           description="Go to a job posting and run AI screening to see results here"
@@ -56,10 +51,10 @@ export default function Screening() {
       ) : (
         <div className="space-y-4">
           {screenedJobs.map(job => {
-            const jobResults = results.filter(r => r.job_id === job.id).sort((a, b) => a.rank - b.rank);
+            const jobResults   = results.filter(r => r.job_id === job.id).sort((a, b) => a.rank - b.rank);
             const topCandidates = jobResults.slice(0, 3);
-            const avgScore = jobResults.length > 0 
-              ? Math.round(jobResults.reduce((s, r) => s + r.match_score, 0) / jobResults.length) 
+            const avgScore     = jobResults.length > 0
+              ? Math.round(jobResults.reduce((s, r) => s + r.match_score, 0) / jobResults.length)
               : 0;
 
             return (

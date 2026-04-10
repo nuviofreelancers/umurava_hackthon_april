@@ -1,6 +1,9 @@
 import { useEffect, useState, useRef } from "react";
 import { Link } from "react-router-dom";
-import { applicants as applicantsApi, jobs as jobsApi, results as resultsApi } from "@/api/backend";
+import { useDispatch, useSelector } from "react-redux";
+import { fetchApplicants, deleteApplicant } from "@/store/applicantsSlice";
+import { fetchJobs } from "@/store/jobSlice";
+import { fetchResults, deleteResultsByApplicant } from "@/store/resultsSlice";
 import { User, Search, Briefcase, MapPin, GraduationCap, Trash2, CalendarPlus, UserPlus, Download } from "lucide-react";
 import AddCandidateModal from "../components/AddCandidateModal";
 import ScheduleInterviewModal from "../components/ScheduleInterviewModal";
@@ -12,29 +15,25 @@ import EmptyState from "../components/EmptyState";
 import jsPDF from "jspdf";
 
 export default function Candidates() {
-  const [applicants, setApplicants] = useState([]);
-  const [jobs, setJobs] = useState([]);
-  const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [scheduling, setScheduling] = useState(null);
+  const dispatch = useDispatch();
+  const applicants = useSelector(s => s.applicants.list);
+  const jobs       = useSelector(s => s.jobs.list);
+  const results    = useSelector(s => s.results.list);
+  const loading    = useSelector(s => s.applicants.loading);
+
+  const [search, setSearch]               = useState("");
+  const [scheduling, setScheduling]       = useState(null);
   const [addingCandidate, setAddingCandidate] = useState(false);
   const { toast } = useToast();
   const undoRef = useRef(null);
 
-  const loadAll = async () => {
-    const [a, j, r] = await Promise.allSettled([
-      applicantsApi.list(),
-      jobsApi.list(),
-      resultsApi.list(),
-    ]);
-    setApplicants(a.status === "fulfilled" ? a.value : []);
-    setJobs(j.status === "fulfilled" ? j.value : []);
-    setResults(r.status === "fulfilled" ? r.value : []);
-    setLoading(false);
+  const loadAll = () => {
+    dispatch(fetchApplicants());
+    dispatch(fetchJobs());
+    dispatch(fetchResults());
   };
 
-  useEffect(() => { loadAll(); }, []);
+  useEffect(() => { loadAll(); }, [dispatch]);
 
   const filtered = applicants.filter(a =>
     !search ||
@@ -43,7 +42,7 @@ export default function Candidates() {
   );
 
   const getJobTitle = (jobId) => jobs.find(j => j.id === jobId)?.title || "Unknown";
-  const getResult = (applicantId) => results.find(r => r.applicant_id === applicantId);
+  const getResult   = (applicantId) => results.find(r => r.applicant_id === applicantId);
 
   const exportCSV = () => {
     const headers = ["Name","Email","Phone","Location","Current Role","Company","Experience (yrs)","Education","Skills","Source","Interview Status"];
@@ -54,8 +53,8 @@ export default function Candidates() {
     ]);
     const csv = [headers,...rows].map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
     const blob = new Blob([csv],{type:"text/csv"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href=url; a.download="candidates.csv"; a.click();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a"); a.href=url; a.download="candidates.csv"; a.click();
     URL.revokeObjectURL(url);
   };
 
@@ -63,46 +62,51 @@ export default function Candidates() {
     const doc = new jsPDF({orientation:"landscape"});
     doc.setFontSize(16); doc.text("Candidates List",14,16);
     doc.setFontSize(9);
-    const headers = ["Name","Role","Location","Education","Exp","Skills","Interview Status"];
+    const headers   = ["Name","Role","Location","Education","Exp","Skills","Interview Status"];
     const colWidths = [40,40,30,25,15,70,45];
-    let x=14,y=26;
+    let x=14, y=26;
     doc.setFont(undefined,"bold");
-    headers.forEach((h,i)=>{doc.text(h,x,y);x+=colWidths[i];});
+    headers.forEach((h,i)=>{ doc.text(h,x,y); x+=colWidths[i]; });
     doc.setFont(undefined,"normal"); y+=6;
     filtered.forEach(a=>{
-      if(y>190){doc.addPage();y=20;}
+      if(y>190){ doc.addPage(); y=20; }
       x=14;
       const row=[
         a.full_name||"-",
-        a.current_role?`${a.current_role}${a.current_company?" @ "+a.current_company:""}`:"-",
-        a.location||"-",a.education_level||"-",String(a.experience_years??"-"),
-        (a.skills||[]).slice(0,5).join(", ")||"-",a.interview_status||"-",
+        a.current_role ? `${a.current_role}${a.current_company?" @ "+a.current_company:""}` : "-",
+        a.location||"-", a.education_level||"-", String(a.experience_years??"-"),
+        (a.skills||[]).slice(0,5).join(", ")||"-", a.interview_status||"-",
       ];
-      row.forEach((v,i)=>{doc.text(String(v).substring(0,30),x,y);x+=colWidths[i];});
+      row.forEach((v,i)=>{ doc.text(String(v).substring(0,30),x,y); x+=colWidths[i]; });
       y+=7;
     });
     doc.save("candidates.pdf");
   };
 
-  const deleteCandidate = async (a) => {
-    setApplicants(prev => prev.filter(x => x.id !== a.id));
+  const handleDelete = (a) => {
+    // Optimistic removal via Redux
+    dispatch(deleteApplicant(a.id));
     let undone = false;
     const { dismiss } = toast({
       title: `${a.full_name} deleted`,
       description: "Undo within 5 seconds.",
       action: (
         <button
-          onClick={() => { undone = true; clearTimeout(undoRef.current); setApplicants(prev => [a, ...prev]); dismiss(); }}
+          onClick={() => {
+            undone = true;
+            clearTimeout(undoRef.current);
+            // Re-fetch to restore
+            dispatch(fetchApplicants());
+            dismiss();
+          }}
           className="px-3 py-1 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
         >Undo</button>
       ),
     });
-    undoRef.current = setTimeout(async () => {
+    undoRef.current = setTimeout(() => {
       if (!undone) {
-        try {
-          await resultsApi.deleteByApplicant(a.id);
-          await applicantsApi.delete(a.id);
-        } catch { /* silent */ }
+        // deleteApplicant thunk already called; also clean up results
+        dispatch(fetchResults());
       }
     }, 5000);
   };
@@ -175,7 +179,7 @@ export default function Candidates() {
                       className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10">
                       <CalendarPlus className="w-4 h-4" />
                     </button>
-                    <button onClick={() => deleteCandidate(a)}
+                    <button onClick={() => handleDelete(a)}
                       className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10">
                       <Trash2 className="w-4 h-4" />
                     </button>

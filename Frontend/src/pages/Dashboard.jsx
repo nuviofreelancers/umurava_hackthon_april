@@ -1,30 +1,25 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Link } from "react-router-dom";
-import { jobs as jobsApi, applicants as applicantsApi, results as resultsApi } from "@/api/backend";
+import { useDispatch, useSelector } from "react-redux";
+import { fetchJobs } from "@/store/jobSlice";
+import { fetchApplicants } from "@/store/applicantsSlice";
+import { fetchResults } from "@/store/resultsSlice";
 import { Briefcase, Users, Sparkles, TrendingUp, ArrowRight } from "lucide-react";
 import StatCard from "../components/StatCard";
 import { Button } from "@/components/ui/button";
 
 export default function Dashboard() {
-  const [jobsList, setJobsList] = useState([]);
-  const [applicantsList, setApplicantsList] = useState([]);
-  const [resultsList, setResultsList] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const dispatch = useDispatch();
+  const jobsList        = useSelector(s => s.jobs.list);
+  const applicantsList  = useSelector(s => s.applicants.list);
+  const resultsList     = useSelector(s => s.results.list);
+  const loading         = useSelector(s => s.jobs.loading);
 
   useEffect(() => {
-    async function load() {
-      const [j, a, r] = await Promise.allSettled([
-        jobsApi.list(),
-        applicantsApi.list(),
-        resultsApi.list(),
-      ]);
-      setJobsList(j.status === 'fulfilled' ? j.value : []);
-      setApplicantsList(a.status === 'fulfilled' ? a.value : []);
-      setResultsList(r.status === 'fulfilled' ? r.value : []);
-      setLoading(false);
-    }
-    load();
-  }, []);
+    dispatch(fetchJobs());
+    dispatch(fetchApplicants());
+    dispatch(fetchResults());
+  }, [dispatch]);
 
   if (loading) {
     return (
@@ -34,12 +29,14 @@ export default function Dashboard() {
     );
   }
 
-  const activeJobs = jobsList.filter(j => j.status === "Active");
-  const screenedJobs = jobsList.filter(j => j.last_screened_at);
-  const avgScore = resultsList.length > 0
+  const activeJobs    = jobsList.filter(j => j.status === "Active");
+  const screenedJobs  = jobsList.filter(j => j.last_screened_at);
+  const avgScore      = resultsList.length > 0
     ? Math.round(resultsList.reduce((s, r) => s + (r.match_score || 0), 0) / resultsList.length)
     : 0;
-  const recentResults = [...resultsList].sort((a, b) => new Date(b.created_date) - new Date(a.created_date)).slice(0, 5);
+  const recentResults = [...resultsList]
+    .sort((a, b) => new Date(b.created_date) - new Date(a.created_date))
+    .slice(0, 5);
 
   return (
     <div className="space-y-8">
@@ -57,10 +54,10 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={Briefcase} label="Active Jobs" value={activeJobs.length} subtitle={`${jobsList.length} total`} />
-        <StatCard icon={Users} label="Total Candidates" value={applicantsList.length} subtitle="Across all jobs" />
-        <StatCard icon={Sparkles} label="Screenings Run" value={screenedJobs.length} subtitle="Jobs screened by AI" />
-        <StatCard icon={TrendingUp} label="Avg Match Score" value={avgScore || "—"} subtitle="Across all results" />
+        <StatCard icon={Briefcase}   label="Active Jobs"       value={activeJobs.length}    subtitle={`${jobsList.length} total`} />
+        <StatCard icon={Users}       label="Total Candidates"  value={applicantsList.length} subtitle="Across all jobs" />
+        <StatCard icon={Sparkles}    label="Screenings Run"    value={screenedJobs.length}  subtitle="Jobs screened by AI" />
+        <StatCard icon={TrendingUp}  label="Avg Match Score"   value={avgScore || "—"}      subtitle="Across all results" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

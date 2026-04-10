@@ -31,10 +31,19 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem("hr_token");
     setUser(null);
     setIsAuthenticated(false);
+    window.location.href = "/login";
+  };
+
+  // Allows components to refresh the user object after a profile update
+  const refreshUser = async () => {
+    try {
+      const u = await auth.me();
+      setUser(u);
+    } catch { /* silent */ }
   };
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated, isLoadingAuth, login, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated, isLoadingAuth, login, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );
