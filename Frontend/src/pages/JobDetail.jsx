@@ -17,17 +17,17 @@ import ShortlistView from "../components/ShortlistView";
 import ScreeningProgress from "../components/ScreeningProgress";
 
 export default function JobDetail() {
-  const { id }       = useParams();
-  const navigate     = useNavigate();
-  const dispatch     = useDispatch();
-  const { toast }    = useToast();
+  const { id }    = useParams();
+  const navigate  = useNavigate();
+  const dispatch  = useDispatch();
+  const { toast } = useToast();
 
-  const job            = useSelector(s => s.jobs.selected);
-  const applicantsList = useSelector(s => s.applicants.list);
-  const resultsList    = useSelector(s => [...s.results.list].sort((a, b) => a.rank - b.rank));
+  const job             = useSelector(s => s.jobs.selected);
+  const applicantsList  = useSelector(s => s.applicants.list);
+  const resultsList     = useSelector(s => [...s.results.list].sort((a, b) => a.rank - b.rank));
   const screeningRunning = useSelector(s => s.results.screening);
   const screeningProgress = useSelector(s => s.results.progress);
-  const loading        = useSelector(s => s.jobs.loading);
+  const loading         = useSelector(s => s.jobs.loading);
 
   const [weights, setWeights] = useState({ skills: 40, experience: 30, education: 15, relevance: 15 });
 
@@ -39,7 +39,6 @@ export default function JobDetail() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Sync weights from loaded job
   useEffect(() => {
     if (job?.screening_weights) setWeights(job.screening_weights);
   }, [job]);
@@ -84,12 +83,16 @@ export default function JobDetail() {
     }, 30000);
   };
 
-  if (loading || !job) {
+  // Separate loading and not-found states
+  if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
       </div>
     );
+  }
+  if (!job) {
+    return <p className="text-center text-muted-foreground py-16">Job not found</p>;
   }
 
   return (

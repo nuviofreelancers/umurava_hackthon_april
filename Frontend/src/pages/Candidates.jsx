@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { fetchApplicants, deleteApplicant } from "@/store/applicantsSlice";
 import { fetchJobs } from "@/store/jobSlice";
-import { fetchResults, deleteResultsByApplicant } from "@/store/resultsSlice";
+import { fetchResults } from "@/store/resultsSlice";
 import { User, Search, Briefcase, MapPin, GraduationCap, Trash2, CalendarPlus, UserPlus, Download } from "lucide-react";
 import AddCandidateModal from "../components/AddCandidateModal";
 import ScheduleInterviewModal from "../components/ScheduleInterviewModal";
@@ -14,8 +14,11 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import EmptyState from "../components/EmptyState";
 import jsPDF from "jspdf";
 
+// Helper: get the display name of a skill regardless of format
+const skillName = (s) => typeof s === "string" ? s : (s?.name ?? "");
+
 export default function Candidates() {
-  const dispatch = useDispatch();
+  const dispatch   = useDispatch();
   const applicants = useSelector(s => s.applicants.list);
   const jobs       = useSelector(s => s.jobs.list);
   const results    = useSelector(s => s.results.list);
@@ -35,11 +38,15 @@ export default function Candidates() {
 
   useEffect(() => { loadAll(); }, [dispatch]);
 
-  const filtered = applicants.filter(a =>
-    !search ||
-    a.full_name?.toLowerCase().includes(search.toLowerCase()) ||
-    (a.skills || []).some(s => s.toLowerCase().includes(search.toLowerCase()))
-  );
+  const filtered = applicants.filter(a => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      a.full_name?.toLowerCase().includes(q) ||
+      // Handle both string[] and {name,level,yearsOfExperience}[] skills
+      (a.skills || []).some(s => skillName(s).toLowerCase().includes(q))
+    );
+  });
 
   const getJobTitle = (jobId) => jobs.find(j => j.id === jobId)?.title || "Unknown";
   const getResult   = (applicantId) => results.find(r => r.applicant_id === applicantId);
@@ -49,12 +56,12 @@ export default function Candidates() {
     const rows = filtered.map(a => [
       a.full_name||"", a.email||"", a.phone||"", a.location||"",
       a.current_role||"", a.current_company||"", a.experience_years??"",
-      a.education_level||"", (a.skills||[]).join("; "), a.source||"", a.interview_status||"",
+      a.education_level||"", (a.skills||[]).map(skillName).join("; "), a.source||"", a.interview_status||"",
     ]);
     const csv = [headers,...rows].map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
     const blob = new Blob([csv],{type:"text/csv"});
     const url  = URL.createObjectURL(blob);
-    const a    = document.createElement("a"); a.href=url; a.download="candidates.csv"; a.click();
+    const el   = document.createElement("a"); el.href=url; el.download="candidates.csv"; el.click();
     URL.revokeObjectURL(url);
   };
 
@@ -75,7 +82,7 @@ export default function Candidates() {
         a.full_name||"-",
         a.current_role ? `${a.current_role}${a.current_company?" @ "+a.current_company:""}` : "-",
         a.location||"-", a.education_level||"-", String(a.experience_years??"-"),
-        (a.skills||[]).slice(0,5).join(", ")||"-", a.interview_status||"-",
+        (a.skills||[]).map(skillName).slice(0,5).join(", ")||"-", a.interview_status||"-",
       ];
       row.forEach((v,i)=>{ doc.text(String(v).substring(0,30),x,y); x+=colWidths[i]; });
       y+=7;
@@ -84,7 +91,6 @@ export default function Candidates() {
   };
 
   const handleDelete = (a) => {
-    // Optimistic removal via Redux
     dispatch(deleteApplicant(a.id));
     let undone = false;
     const { dismiss } = toast({
@@ -92,22 +98,13 @@ export default function Candidates() {
       description: "Undo within 5 seconds.",
       action: (
         <button
-          onClick={() => {
-            undone = true;
-            clearTimeout(undoRef.current);
-            // Re-fetch to restore
-            dispatch(fetchApplicants());
-            dismiss();
-          }}
+          onClick={() => { undone = true; clearTimeout(undoRef.current); dispatch(fetchApplicants()); dismiss(); }}
           className="px-3 py-1 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
         >Undo</button>
       ),
     });
     undoRef.current = setTimeout(() => {
-      if (!undone) {
-        // deleteApplicant thunk already called; also clean up results
-        dispatch(fetchResults());
-      }
+      if (!undone) dispatch(fetchResults());
     }, 5000);
   };
 
@@ -153,6 +150,7 @@ export default function Candidates() {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filtered.map(a => {
             const result = getResult(a.id);
+            const skills = (a.skills || []).map(skillName);
             return (
               <div key={a.id} className="bg-card rounded-xl border border-border p-5 hover:shadow-md transition-all group">
                 <div className="flex items-start gap-3">
@@ -191,9 +189,10 @@ export default function Candidates() {
                     {a.education_level && <span className="flex items-center gap-1"><GraduationCap className="w-3 h-3" />{a.education_level}</span>}
                   </div>
                   <div className="flex flex-wrap gap-1">
-                    {(a.skills||[]).slice(0,4).map(s => (
+                    {skills.slice(0,4).map(s => (
                       <span key={s} className="px-1.5 py-0.5 bg-primary/5 text-primary rounded text-[10px]">{s}</span>
                     ))}
+                    {skills.length > 4 && <span className="text-[10px] text-muted-foreground">+{skills.length - 4}</span>}
                   </div>
                   <div className="pt-2 border-t border-border flex items-center justify-between">
                     <span className="text-[10px] text-muted-foreground px-1.5 py-0.5 bg-muted rounded">{a.source}</span>

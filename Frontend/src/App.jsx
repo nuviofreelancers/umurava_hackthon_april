@@ -39,7 +39,7 @@ const AuthenticatedApp = () => {
 
       {/* Protected — redirect to /login if not authenticated */}
       <Route element={isAuthenticated ? <Layout /> : <Navigate to="/login" replace />}>
-        <Route index                                   element={<Navigate to="/jobs" replace />} />
+        <Route index                 element={<Navigate to="/jobs" replace />} />
         <Route path="/"              element={<Navigate to="/jobs" replace />} />
         <Route path="/dashboard"     element={<Dashboard />} />
         <Route path="/jobs"          element={<Jobs />} />

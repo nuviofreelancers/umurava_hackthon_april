@@ -73,7 +73,6 @@ export default function Login() {
 
           {/* Dev hint */}
           <p className="text-center text-xs text-muted-foreground pt-1">
-            Dev mode — any email &amp; password works
           </p>
         </form>
       </div>
