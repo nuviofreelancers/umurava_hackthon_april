@@ -106,7 +106,7 @@ export default function JobForm() {
         sessionStorage.setItem("csv_jobs_preview", JSON.stringify(result.jobs));
         navigate("/jobs/csv-preview");
       } else {
-        toast({ title: "Could not parse CSV", description: "No job data found in the file.", variant: "destructive" });
+        toast({ title: "Could not parse file", description: "No job data found.", variant: "destructive" });
       }
     } catch {
       toast({ title: "Upload failed", variant: "destructive" });
@@ -128,10 +128,10 @@ export default function JobForm() {
           </div>
         </div>
         <div>
-          <input ref={csvInputRef} type="file" accept=".csv,.xlsx" className="hidden" onChange={handleCsvUpload} />
+          <input ref={csvInputRef} type="file" accept=".csv,.xlsx,.json" className="hidden" onChange={handleCsvUpload} />
           <Button variant="outline" size="sm" className="gap-1.5" onClick={() => csvInputRef.current?.click()} disabled={csvParsing}>
             {csvParsing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-            {csvParsing ? "Parsing..." : "Import CSV"}
+            {csvParsing ? "Parsing..." : "Import CSV / JSON"}
           </Button>
         </div>
       </div>

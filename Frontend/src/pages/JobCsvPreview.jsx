@@ -85,7 +85,7 @@ export default function JobCsvPreview() {
         </button>
         <div>
           <h1 className="text-2xl font-heading font-bold">Preview Imported Jobs</h1>
-          <p className="text-muted-foreground text-sm mt-0.5">{jobs.length} job{jobs.length > 1 ? "s" : ""} parsed — review and edit before importing</p>
+          <p className="text-muted-foreground text-sm mt-0.5">{jobs.length} job{jobs.length > 1 ? "s" : ""} parsed from file — review and edit before importing</p>
         </div>
       </div>
 

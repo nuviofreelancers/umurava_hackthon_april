@@ -72,6 +72,9 @@ export const screening = {
 };
 
 // ─── File Upload ──────────────────────────────────────────────
+// NOTE: JSON files are handled entirely client-side in ApplicantUpload.jsx
+// and JobForm.jsx using the Anthropic API for normalization.
+// These backend routes handle CSV / PDF only.
 export const uploads = {
   parseCandidates: async (file, jobId) => {
     const formData = new FormData();

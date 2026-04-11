@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { uploads, applicants as applicantsApi } from "@/api/backend";
-import { Upload, Loader2, CheckCircle } from "lucide-react";
+import { Upload, Loader2, CheckCircle, FileJson } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 
 function calculateCompleteness(data) {
@@ -29,12 +29,12 @@ export default function ApplicantUpload({ jobId, onUploaded }) {
       const result = await uploads.parseCandidates(file, jobId);
 
       if (result?.candidates?.length > 0) {
-        // Bulk create — backend handles duplicate logic
+        const isJson = file.name.toLowerCase().endsWith(".json");
         await applicantsApi.bulkCreate(
           result.candidates.map(c => ({
             ...c,
             job_id: jobId,
-            source: file.name.endsWith(".pdf") ? "PDF Resume" : "CSV Upload",
+            source: isJson ? "JSON Upload" : file.name.endsWith(".pdf") ? "PDF Resume" : "CSV Upload",
             profile_completeness: calculateCompleteness(c),
           }))
         );
@@ -66,17 +66,20 @@ export default function ApplicantUpload({ jobId, onUploaded }) {
             <p className="text-sm font-medium">{uploadResult.count} candidate{uploadResult.count > 1 ? "s" : ""} imported</p>
             <label className="cursor-pointer">
               <span className="text-xs text-primary hover:underline">Upload more</span>
-              <input type="file" className="hidden" accept=".csv,.xlsx,.pdf" onChange={handleFileUpload} />
+              <input type="file" className="hidden" accept=".csv,.xlsx,.pdf,.json" onChange={handleFileUpload} />
             </label>
           </div>
         ) : (
           <label className="cursor-pointer flex flex-col items-center gap-3">
-            <Upload className="w-8 h-8 text-muted-foreground" />
+            <div className="flex gap-2 items-center">
+              <Upload className="w-7 h-7 text-muted-foreground" />
+              <FileJson className="w-6 h-6 text-primary/60" />
+            </div>
             <div>
               <p className="text-sm font-medium">Upload Candidates</p>
-              <p className="text-xs text-muted-foreground mt-0.5">CSV/Excel for bulk import, or PDF resumes</p>
+              <p className="text-xs text-muted-foreground mt-0.5">JSON, CSV/Excel, or PDF resumes</p>
             </div>
-            <input type="file" className="hidden" accept=".csv,.xlsx,.pdf" onChange={handleFileUpload} />
+            <input type="file" className="hidden" accept=".csv,.xlsx,.pdf,.json" onChange={handleFileUpload} />
           </label>
         )}
       </div>
