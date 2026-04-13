@@ -1,8 +1,3 @@
-// ============================================================
-// backend.js — Central API layer replacing all Base44 calls
-// Every component imports from here, never raw fetch() calls
-// ============================================================
-
 const BASE = "/api";
 
 async function request(path, options = {}) {
@@ -73,8 +68,7 @@ export const screening = {
 
 // ─── File Upload ──────────────────────────────────────────────
 // NOTE: JSON files are handled entirely client-side in ApplicantUpload.jsx
-// and JobForm.jsx using the Anthropic API for normalization.
-// These backend routes handle CSV / PDF only.
+// and JobForm.jsx using the API for normalization.
 export const uploads = {
   parseCandidates: async (file, jobId) => {
     const formData = new FormData();

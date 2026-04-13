@@ -11,8 +11,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      // When your teammate's backend is running, point this to it.
-      // For now it just prevents 404s from crashing the dev server.
+      // pass backend here
       '/api': {
         target: 'http://localhost:5000',
         changeOrigin: true,
