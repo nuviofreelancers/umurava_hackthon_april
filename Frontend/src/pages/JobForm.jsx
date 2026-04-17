@@ -256,16 +256,16 @@ export default function JobForm() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <Label>Salary Range Min ({form.currency_symbol})</Label>
-            <div className="relative mt-1.5">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">{form.currency_symbol}</span>
-              <Input type="number" value={form.salary_range_min} onChange={e => update("salary_range_min", Number(e.target.value))} className="pl-8" />
+            <div className="flex mt-1.5 rounded-lg border border-input overflow-hidden focus-within:ring-2 focus-within:ring-ring">
+              <span className="flex items-center px-3 bg-muted text-muted-foreground text-sm font-medium border-r border-input whitespace-nowrap">{form.currency_symbol}</span>
+              <input type="number" value={form.salary_range_min} onChange={e => update("salary_range_min", Number(e.target.value))} className="flex-1 px-3 py-2 text-sm bg-background outline-none min-w-0" />
             </div>
           </div>
           <div>
             <Label>Salary Range Max ({form.currency_symbol})</Label>
-            <div className="relative mt-1.5">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">{form.currency_symbol}</span>
-              <Input type="number" value={form.salary_range_max} onChange={e => update("salary_range_max", Number(e.target.value))} className="pl-8" />
+            <div className="flex mt-1.5 rounded-lg border border-input overflow-hidden focus-within:ring-2 focus-within:ring-ring">
+              <span className="flex items-center px-3 bg-muted text-muted-foreground text-sm font-medium border-r border-input whitespace-nowrap">{form.currency_symbol}</span>
+              <input type="number" value={form.salary_range_max} onChange={e => update("salary_range_max", Number(e.target.value))} className="flex-1 px-3 py-2 text-sm bg-background outline-none min-w-0" />
             </div>
           </div>
         </div>

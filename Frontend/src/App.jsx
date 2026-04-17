@@ -16,6 +16,7 @@ import Candidates from './pages/Candidates';
 import Screening from './pages/Screening';
 import CandidateCompare from './pages/CandidateCompare';
 import JobCsvPreview from './pages/JobCsvPreview';
+import CandidateCsvPreview from './pages/CandidateCsvPreview';
 import CandidateDetail from './pages/CandidateDetail';
 import Profile from './pages/Profile';
 
@@ -44,7 +45,8 @@ const AuthenticatedApp = () => {
         <Route path="/dashboard"     element={<Dashboard />} />
         <Route path="/jobs"          element={<Jobs />} />
         <Route path="/jobs/new"      element={<JobForm />} />
-        <Route path="/jobs/csv-preview" element={<JobCsvPreview />} />
+        <Route path="/jobs/csv-preview"        element={<JobCsvPreview />} />
+        <Route path="/candidates/csv-preview"  element={<CandidateCsvPreview />} />
         <Route path="/jobs/:id"      element={<JobDetail />} />
         <Route path="/candidates"    element={<Candidates />} />
         <Route path="/screening"     element={<Screening />} />

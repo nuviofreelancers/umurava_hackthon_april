@@ -2,7 +2,9 @@ import { Outlet, Link, useLocation } from "react-router-dom";
 import { LayoutDashboard, Briefcase, Users, Sparkles, Menu, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import UserDropdown from "./UserDropdown";
+import DarkModeToggle from "./DarkModeToggle";
 import expandedLogo from "../assets/expanded-logo.png";
+import expandedLogoDark from "../assets/expanded-logo-dark.png";
 import collapsedLogo from "../assets/collapsed-logo.png";
 
 const navItems = [
@@ -34,11 +36,14 @@ export default function Layout() {
         {/* Logo row */}
         <div className="relative flex items-center h-16 px-3 border-b border-sidebar-border shrink-0 overflow-hidden">
           <div className={`flex items-center transition-all duration-300 overflow-hidden ${collapsed ? "w-8 justify-center" : "flex-1"}`}>
-            <img
-              src={collapsed ? collapsedLogo : expandedLogo}
-              alt="Umurava"
-              className={`object-contain transition-all duration-300 ${collapsed ? "w-8 h-8 rounded-full" : "h-8 w-auto"}`}
-            />
+            {collapsed ? (
+              <img src={collapsedLogo} alt="Umurava" className="w-8 h-8 rounded-full object-contain" />
+            ) : (
+              <>
+                <img src={expandedLogo} alt="Umurava" className="h-8 w-auto object-contain block dark:hidden" />
+                <img src={expandedLogoDark} alt="Umurava" className="h-8 w-auto object-contain hidden dark:block" />
+              </>
+            )}
           </div>
 
           {/* Desktop toggle button */}
@@ -112,7 +117,10 @@ export default function Layout() {
             <Menu className="w-5 h-5" />
           </button>
           <div className="flex-1" />
-          <UserDropdown />
+          <div className="flex items-center gap-2">
+            <DarkModeToggle />
+            <UserDropdown />
+          </div>
         </header>
         <div className="flex-1 overflow-y-auto">
           <div className="p-4 lg:p-8 max-w-7xl mx-auto w-full">

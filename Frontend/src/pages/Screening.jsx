@@ -1,21 +1,27 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { fetchJobs } from "@/store/jobSlice";
 import { fetchResults } from "@/store/resultsSlice";
-import { Sparkles, Briefcase, ArrowRight, Clock } from "lucide-react";
+import { fetchApplicants } from "@/store/applicantsSlice";
+import { Sparkles, Briefcase, ArrowRight, Clock, CalendarPlus } from "lucide-react";
 import EmptyState from "../components/EmptyState";
+import ScheduleInterviewModal from "../components/ScheduleInterviewModal";
 import moment from "moment";
 
 export default function Screening() {
   const dispatch = useDispatch();
-  const jobs    = useSelector(s => s.jobs.list);
-  const results = useSelector(s => s.results.list);
-  const loading = useSelector(s => s.jobs.loading);
+  const jobs      = useSelector(s => s.jobs.list);
+  const results   = useSelector(s => s.results.list);
+  const applicants = useSelector(s => s.applicants.list);
+  const loading   = useSelector(s => s.jobs.loading);
+
+  const [scheduling, setScheduling] = useState(null); // { applicant, jobTitle }
 
   useEffect(() => {
     dispatch(fetchJobs());
     dispatch(fetchResults());
+    dispatch(fetchApplicants());
   }, [dispatch]);
 
   const screenedJobs = jobs.filter(j => j.last_screened_at);
@@ -51,19 +57,19 @@ export default function Screening() {
       ) : (
         <div className="space-y-4">
           {screenedJobs.map(job => {
-            const jobResults   = results.filter(r => r.job_id === job.id).sort((a, b) => a.rank - b.rank);
+            const jobResults    = results.filter(r => r.job_id === job.id).sort((a, b) => a.rank - b.rank);
             const topCandidates = jobResults.slice(0, 3);
-            const avgScore     = jobResults.length > 0
+            const avgScore      = jobResults.length > 0
               ? Math.round(jobResults.reduce((s, r) => s + r.match_score, 0) / jobResults.length)
               : 0;
 
             return (
-              <Link
-                key={job.id}
-                to={`/jobs/${job.id}`}
-                className="block bg-card rounded-xl border border-border p-5 hover:border-primary/30 hover:shadow-md transition-all"
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div key={job.id} className="bg-card rounded-xl border border-border overflow-hidden">
+                {/* Job header — clickable to job detail */}
+                <Link
+                  to={`/jobs/${job.id}`}
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-5 hover:bg-muted/30 transition-colors"
+                >
                   <div>
                     <div className="flex items-center gap-2">
                       <Briefcase className="w-4 h-4 text-primary" />
@@ -81,29 +87,54 @@ export default function Screening() {
                     </div>
                   </div>
                   <ArrowRight className="w-4 h-4 text-muted-foreground hidden sm:block" />
-                </div>
+                </Link>
 
+                {/* Top candidates with schedule buttons */}
                 {topCandidates.length > 0 && (
-                  <div className="flex items-center gap-3 mt-4 pt-3 border-t border-border">
-                    <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Top 3:</span>
-                    {topCandidates.map(r => (
-                      <div key={r.id} className="flex items-center gap-2">
-                        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold border ${
-                          r.match_score >= 80 ? 'text-accent bg-accent/10 border-accent/20' :
-                          r.match_score >= 60 ? 'text-primary bg-primary/10 border-primary/20' :
-                          'text-warning bg-warning/10 border-warning/20'
-                        }`}>
-                          {r.match_score}
-                        </div>
-                        <span className="text-xs font-medium">{r.applicant_name}</span>
-                      </div>
-                    ))}
+                  <div className="px-5 pb-4 border-t border-border pt-3">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">Top candidates</p>
+                    <div className="space-y-2">
+                      {topCandidates.map(r => {
+                        const applicant = applicants.find(a => a.id === r.applicant_id);
+                        return (
+                          <div key={r.id} className="flex items-center gap-3">
+                            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold border shrink-0 ${
+                              r.match_score >= 80 ? "text-accent bg-accent/10 border-accent/20" :
+                              r.match_score >= 60 ? "text-primary bg-primary/10 border-primary/20" :
+                              "text-warning bg-warning/10 border-warning/20"
+                            }`}>
+                              {r.match_score}
+                            </div>
+                            <span className="text-xs font-medium flex-1">{r.applicant_name}</span>
+                            {applicant && (
+                              <button
+                                onClick={() => setScheduling({ applicant, jobTitle: job.title })}
+                                title="Schedule Interview"
+                                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:text-primary hover:border-primary hover:bg-primary/5 transition-all"
+                              >
+                                <CalendarPlus className="w-3.5 h-3.5" />
+                                Schedule
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
-              </Link>
+              </div>
             );
           })}
         </div>
+      )}
+
+      {scheduling && (
+        <ScheduleInterviewModal
+          applicant={scheduling.applicant}
+          jobTitle={scheduling.jobTitle}
+          onClose={() => setScheduling(null)}
+          onScheduled={() => setScheduling(null)}
+        />
       )}
     </div>
   );

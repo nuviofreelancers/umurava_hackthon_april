@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { uploads, applicants as applicantsApi } from "@/api/backend";
+import { useNavigate } from "react-router-dom";
+import { uploads } from "@/api/backend";
 import { Upload, Loader2, CheckCircle, FileJson } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 
@@ -10,7 +11,8 @@ function calculateCompleteness(data) {
 }
 
 export default function ApplicantUpload({ jobId, onUploaded }) {
-  const [uploading, setUploading] = useState(false);
+  const navigate        = useNavigate();
+  const [uploading, setUploading]       = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const { toast } = useToast();
 
@@ -30,17 +32,18 @@ export default function ApplicantUpload({ jobId, onUploaded }) {
 
       if (result?.candidates?.length > 0) {
         const isJson = file.name.toLowerCase().endsWith(".json");
-        await applicantsApi.bulkCreate(
-          result.candidates.map(c => ({
-            ...c,
-            job_id: jobId,
-            source: isJson ? "JSON Upload" : file.name.endsWith(".pdf") ? "PDF Resume" : "CSV Upload",
-            profile_completeness: calculateCompleteness(c),
-          }))
-        );
-        setUploadResult({ count: result.candidates.length });
-        toast({ title: "Import complete", description: `${result.candidates.length} candidate(s) imported` });
-        onUploaded?.();
+        const source = isJson ? "JSON Upload" : file.name.toLowerCase().endsWith(".pdf") ? "PDF Resume" : "CSV Upload";
+
+        // Tag each candidate with job_id and source, then send to preview
+        const tagged = result.candidates.map(c => ({
+          ...c,
+          job_id: jobId,
+          source,
+          profile_completeness: calculateCompleteness(c),
+        }));
+
+        sessionStorage.setItem("csv_candidates_preview", JSON.stringify(tagged));
+        navigate("/candidates/csv-preview");
       } else {
         toast({ title: "No candidates found", description: "Check the file format and try again.", variant: "destructive" });
       }
@@ -58,12 +61,12 @@ export default function ApplicantUpload({ jobId, onUploaded }) {
         {uploading ? (
           <div className="flex flex-col items-center gap-2">
             <Loader2 className="w-8 h-8 text-primary animate-spin" />
-            <p className="text-sm text-muted-foreground">Parsing and importing candidates...</p>
+            <p className="text-sm text-muted-foreground">Parsing candidates...</p>
           </div>
         ) : uploadResult ? (
           <div className="flex flex-col items-center gap-2">
             <CheckCircle className="w-8 h-8 text-accent" />
-            <p className="text-sm font-medium">{uploadResult.count} candidate{uploadResult.count > 1 ? "s" : ""} imported</p>
+            <p className="text-sm font-medium">{uploadResult.count} candidate{uploadResult.count > 1 ? "s" : ""} ready</p>
             <label className="cursor-pointer">
               <span className="text-xs text-primary hover:underline">Upload more</span>
               <input type="file" className="hidden" accept=".csv,.xlsx,.pdf,.json" onChange={handleFileUpload} />

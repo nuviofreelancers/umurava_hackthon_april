@@ -37,8 +37,12 @@ export default function AddCandidateModal({ jobs, onClose, onAdded }) {
   const removeSkill = (name) => update("skills", form.skills.filter(s => (typeof s === "string" ? s : s.name) !== name));
 
   const save = async () => {
-    if (!form.full_name.trim()) { toast({ title: "Name is required", variant: "destructive" }); return; }
     if (!form.job_id) { toast({ title: "Please select a job", variant: "destructive" }); return; }
+    if (!form.full_name.trim()) { toast({ title: "Full name is required", variant: "destructive" }); return; }
+    if (!form.email.trim()) { toast({ title: "Email is required", variant: "destructive" }); return; }
+    if (!form.current_role.trim()) { toast({ title: "Current role is required", variant: "destructive" }); return; }
+    if (!form.experience_years && form.experience_years !== 0) { toast({ title: "Experience years is required", variant: "destructive" }); return; }
+    if (form.skills.length === 0) { toast({ title: "At least one skill is required", variant: "destructive" }); return; }
     setSaving(true);
     try {
       const coreFields = ["full_name", "email", "skills", "experience_years", "education_level", "current_role"];
@@ -90,8 +94,8 @@ export default function AddCandidateModal({ jobs, onClose, onAdded }) {
             <>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div><Label className="text-xs">Full Name *</Label><Input value={form.full_name} onChange={e => update("full_name", e.target.value)} className="mt-1" placeholder="John Doe" /></div>
-                <div><Label className="text-xs">Email</Label><Input value={form.email} onChange={e => update("email", e.target.value)} className="mt-1" placeholder="john@example.com" /></div>
-                <div><Label className="text-xs">Current Role</Label><Input value={form.current_role} onChange={e => update("current_role", e.target.value)} className="mt-1" placeholder="Software Engineer" /></div>
+                <div><Label className="text-xs">Email *</Label><Input value={form.email} onChange={e => update("email", e.target.value)} className="mt-1" placeholder="john@example.com" /></div>
+                <div><Label className="text-xs">Current Role *</Label><Input value={form.current_role} onChange={e => update("current_role", e.target.value)} className="mt-1" placeholder="Software Engineer" /></div>
                 <div><Label className="text-xs">Current Company</Label><Input value={form.current_company} onChange={e => update("current_company", e.target.value)} className="mt-1" placeholder="TechCorp" /></div>
                 <div><Label className="text-xs">Experience (years)</Label><Input type="number" value={form.experience_years} onChange={e => update("experience_years", Number(e.target.value))} className="mt-1" /></div>
                 <div>
