@@ -1,49 +1,28 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
-import { auth } from '@/api/backend';
+import React, { createContext, useContext } from 'react';
 
 const AuthContext = createContext();
 
+// Auth is bypassed — always authenticated with a default user.
+// Re-enable login when MongoDB is connected.
+const DEFAULT_USER = {
+  full_name: "HR Admin",
+  email: "admin@umurava.com",
+};
+
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isLoadingAuth, setIsLoadingAuth] = useState(true);
-
-  useEffect(() => {
-    const token = localStorage.getItem("hr_token");
-    if (token) {
-      auth.me()
-        .then(u => { setUser(u); setIsAuthenticated(true); })
-        .catch(() => { localStorage.removeItem("hr_token"); })
-        .finally(() => setIsLoadingAuth(false));
-    } else {
-      setIsLoadingAuth(false);
-    }
-  }, []);
-
-  const login = async (email, password) => {
-    const data = await auth.login(email, password);
-    localStorage.setItem("hr_token", data.token);
-    setUser(data.user);
-    setIsAuthenticated(true);
-  };
-
-  const logout = () => {
-    localStorage.removeItem("hr_token");
-    setUser(null);
-    setIsAuthenticated(false);
-    window.location.href = "/login";
-  };
-
-  // Allows components to refresh the user object after a profile update
-  const refreshUser = async () => {
-    try {
-      const u = await auth.me();
-      setUser(u);
-    } catch { /* silent */ }
-  };
+  const login = async () => {};
+  const logout = () => {};
+  const refreshUser = async () => {};
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated, isLoadingAuth, login, logout, refreshUser }}>
+    <AuthContext.Provider value={{
+      user: DEFAULT_USER,
+      isAuthenticated: true,
+      isLoadingAuth: false,
+      login,
+      logout,
+      refreshUser,
+    }}>
       {children}
     </AuthContext.Provider>
   );
