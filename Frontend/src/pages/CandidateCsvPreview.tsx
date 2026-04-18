@@ -91,16 +91,17 @@ export default function CandidateCsvPreview() {
     }
     setSaving(true);
     try {
-      await applicantsApi.bulkCreate(
-        valid.map(c => ({
-          ...c,
-          source: "CSV Upload",
-          profile_completeness: calculateCompleteness(c),
-        }))
-      );
+      // Pull jobId and sourceType set by ApplicantUpload
+      const jobId      = (valid[0] as any).job_id;
+      const sourceType = (valid[0] as any).sourceType || "csv";
+      const docs = valid.map(c => {
+        const { job_id: _jid, sourceType: _st, ...rest } = c as any;
+        return { ...rest, profile_completeness: calculateCompleteness(c) };
+      });
+      await applicantsApi.bulkCreate(docs, jobId, sourceType);
       sessionStorage.removeItem("csv_candidates_preview");
       toast({ title: `${valid.length} candidate${valid.length > 1 ? "s" : ""} imported` });
-      navigate("/candidates");
+      navigate(jobId ? `/jobs/${jobId}` : "/candidates");
     } catch {
       toast({ title: "Import failed", description: "Please try again.", variant: "destructive" });
     }

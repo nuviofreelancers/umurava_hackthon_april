@@ -11,7 +11,6 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      // pass backend here
       '/api': {
         target: 'http://localhost:5000',
         changeOrigin: true,

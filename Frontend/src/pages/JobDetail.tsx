@@ -7,6 +7,7 @@ import { fetchResultsByJob, runScreening, deleteResultsByJob } from "@/store/res
 import { applicants as applicantsApi } from "@/api/backend";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
 import { ArrowLeft, Edit, Users, Sparkles, Loader2, Trash2, RefreshCw } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import ApplicantUpload from "../components/ApplicantUpload";
@@ -17,24 +18,25 @@ import ShortlistView from "../components/ShortlistView";
 import ScreeningProgress from "../components/ScreeningProgress";
 
 export default function JobDetail() {
-  const { id }    = useParams();
+  const { id }    = useParams<{ id: string }>();
   const navigate  = useNavigate();
   const dispatch  = useDispatch();
   const { toast } = useToast();
 
-  const job             = useSelector(s => s.jobs.selected);
-  const applicantsList  = useSelector(s => s.applicants.list);
-  const resultsList     = useSelector(s => [...s.results.list].sort((a, b) => a.rank - b.rank));
-  const screeningRunning = useSelector(s => s.results.screening);
-  const screeningProgress = useSelector(s => s.results.progress);
-  const loading         = useSelector(s => s.jobs.loading);
+  const job              = useSelector((s: any) => s.jobs.selected);
+  const applicantsList   = useSelector((s: any) => s.applicants.list);
+  const resultsList      = useSelector((s: any) => [...s.results.list].sort((a: any, b: any) => a.rank - b.rank));
+  const screeningRunning = useSelector((s: any) => s.results.screening);
+  const screeningProgress = useSelector((s: any) => s.results.progress);
+  const loading          = useSelector((s: any) => s.jobs.loading);
 
-  const [weights, setWeights] = useState({ skills: 40, experience: 30, education: 15, relevance: 15 });
+  const [weights, setWeights]           = useState({ skills: 40, experience: 30, education: 15, relevance: 15 });
+  const [shortlistSize, setShortlistSize] = useState<number>(10);
 
   const loadData = useCallback(() => {
-    dispatch(fetchJob(id));
-    dispatch(fetchApplicantsByJob(id));
-    dispatch(fetchResultsByJob(id));
+    dispatch(fetchJob(id!) as any);
+    dispatch(fetchApplicantsByJob(id!) as any);
+    dispatch(fetchResultsByJob(id!) as any);
   }, [id, dispatch]);
 
   useEffect(() => { loadData(); }, [loadData]);
@@ -48,17 +50,19 @@ export default function JobDetail() {
       toast({ title: "No applicants", description: "Add candidates before screening", variant: "destructive" });
       return;
     }
+    const clampedSize = Math.min(Math.max(1, shortlistSize), applicantsList.length);
     try {
-      await dispatch(updateJob({ id, data: { screening_weights: weights } }));
-      await dispatch(runScreening({ jobId: id, weights })).unwrap();
-      toast({ title: "Screening complete" });
+      await dispatch(updateJob({ id: id!, data: { screening_weights: weights } }) as any);
+      await dispatch(runScreening({ jobId: id!, weights, shortlistSize: clampedSize }) as any).unwrap();
+      toast({ title: "Screening complete", description: `Top ${clampedSize} candidates ranked.` });
       loadData();
-    } catch (e) {
+    } catch (e: any) {
       toast({ title: "Screening failed", description: e.message, variant: "destructive" });
     }
   };
 
   const handleDeleteJob = () => {
+    if (!job) return;
     let undone = false;
     const { dismiss } = toast({
       title: `"${job.title}" will be deleted`,
@@ -75,15 +79,14 @@ export default function JobDetail() {
     setTimeout(async () => {
       if (!undone) {
         try {
-          await dispatch(deleteResultsByJob(id));
-          for (const a of applicantsList) await applicantsApi.delete(a.id);
-          await dispatch(deleteJob(id));
+          await dispatch(deleteResultsByJob(id!) as any);
+          for (const a of applicantsList as any[]) await applicantsApi.delete(a.id);
+          await dispatch(deleteJob(id!) as any);
         } catch { /* silent — user already navigated away */ }
       }
     }, 30000);
   };
 
-  // Separate loading and not-found states
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -107,7 +110,7 @@ export default function JobDetail() {
             <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
               {job.department && <span>{job.department}</span>}
               {job.location   && <span>· {job.location}</span>}
-              <span>· {job.experience_level}</span>
+              {job.experience_level && <span>· {job.experience_level}</span>}
             </div>
           </div>
         </div>
@@ -149,19 +152,37 @@ export default function JobDetail() {
                     <TabsTrigger value="manual" className="flex-1 text-xs">Manual</TabsTrigger>
                   </TabsList>
                   <TabsContent value="upload" className="mt-3">
-                    <ApplicantUpload jobId={id} onUploaded={loadData} />
+                    <ApplicantUpload jobId={id!} onUploaded={loadData} />
                   </TabsContent>
                   <TabsContent value="manual" className="mt-3">
-                    <ManualApplicantForm jobId={id} onAdded={loadData} />
+                    <ManualApplicantForm jobId={id!} onAdded={loadData} />
                   </TabsContent>
                 </Tabs>
               </div>
-              <div className="bg-card rounded-xl border border-border p-5">
+
+              <div className="bg-card rounded-xl border border-border p-5 space-y-4">
                 <WeightSliders weights={weights} onChange={setWeights} />
+
+                {/* Shortlist size control */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Shortlist size
+                    <span className="ml-1 text-muted-foreground/60">(max {applicantsList.length})</span>
+                  </label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={applicantsList.length || 100}
+                    value={shortlistSize}
+                    onChange={e => setShortlistSize(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="h-8 text-sm"
+                  />
+                </div>
+
                 <Button
                   onClick={handleRunScreening}
                   disabled={screeningRunning || applicantsList.length === 0}
-                  className="w-full mt-4 bg-accent hover:bg-accent/90 text-accent-foreground gap-2"
+                  className="w-full bg-accent hover:bg-accent/90 text-accent-foreground gap-2"
                 >
                   {screeningRunning ? (
                     <><Loader2 className="w-4 h-4 animate-spin" /> Screening...</>

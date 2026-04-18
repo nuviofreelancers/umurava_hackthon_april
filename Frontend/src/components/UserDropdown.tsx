@@ -6,20 +6,19 @@ import { useAuth } from "@/lib/AuthContext";
 export default function UserDropdown() {
   const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
+  const ref = useRef<HTMLDivElement>(null);
 
-  // Close when clicking outside
   useEffect(() => {
     if (!open) return;
-    const handler = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
   const initials = user?.full_name
-    ? user.full_name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)
+    ? user.full_name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
     : "?";
 
   return (
