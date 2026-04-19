@@ -1,10 +1,11 @@
 import { useRef, useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { User, LogOut } from "lucide-react";
 import { useAuth } from "@/lib/AuthContext";
 
 export default function UserDropdown() {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -16,6 +17,12 @@ export default function UserDropdown() {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
+
+  const handleLogout = () => {
+    setOpen(false);
+    logout();           // clears token + user state
+    navigate("/login", { replace: true }); // React Router handles the redirect
+  };
 
   const initials = user?.full_name
     ? user.full_name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
@@ -46,7 +53,7 @@ export default function UserDropdown() {
               <User className="w-4 h-4" /> My Profile
             </Link>
             <button
-              onClick={() => { setOpen(false); logout(); }}
+              onClick={handleLogout}
               className="flex items-center gap-2 px-4 py-2 text-sm text-destructive hover:bg-destructive/10 w-full transition-colors"
             >
               <LogOut className="w-4 h-4" /> Sign Out

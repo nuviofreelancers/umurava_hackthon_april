@@ -50,10 +50,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setUser(data.user);
   };
 
+  // Clears state only — navigation is handled by the caller (UserDropdown)
+  // so React Router's navigate() is used instead of window.location
   const logout = () => {
     localStorage.removeItem('hr_token');
     setUser(null);
-    window.location.href = '/login';
   };
 
   return (
