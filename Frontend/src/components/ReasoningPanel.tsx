@@ -67,11 +67,16 @@ export default function ReasoningPanel({ result }) {
             <XCircle className="w-3.5 h-3.5 text-destructive" /> Gaps & Risks
           </h4>
           <ul className="space-y-1.5">
-            {(result.gaps || []).map((g, i) => (
-              <li key={i} className="text-xs text-foreground flex items-start gap-2">
-                <span className="w-1 h-1 rounded-full bg-destructive mt-1.5 shrink-0" />{g}
-              </li>
-            ))}
+            {(result.gaps || []).map((g, i) => {
+              const text = typeof g === "string" ? g : (g?.description || "");
+              const isDeadbreaker = typeof g === "object" && g?.type === "dealbreaker";
+              return (
+                <li key={i} className="text-xs text-foreground flex items-start gap-2">
+                  <span className={`w-1 h-1 rounded-full mt-1.5 shrink-0 ${isDeadbreaker ? "bg-destructive" : "bg-warning"}`} />
+                  <span>{text}{isDeadbreaker && <span className="ml-1 text-[10px] text-destructive font-medium">(dealbreaker)</span>}</span>
+                </li>
+              );
+            })}
           </ul>
         </div>
       </div>

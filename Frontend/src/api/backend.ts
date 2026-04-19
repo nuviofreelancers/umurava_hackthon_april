@@ -104,4 +104,22 @@ export const uploads = {
     if (!res.ok) throw new Error("Upload failed");
     return res.json();
   },
+
+  parseCandidateFromUrl: async (url: string, jobId?: string): Promise<unknown> => {
+    const token = localStorage.getItem("hr_token");
+    const res = await fetch(`${API_BASE}/upload/candidates`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ cv_url: url, job_id: jobId }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: "URL parsing failed" }));
+      throw new Error(err.message || "URL parsing failed");
+    }
+    return res.json();
+  },
 };
+

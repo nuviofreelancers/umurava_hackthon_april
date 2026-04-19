@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { fetchJobs } from "@/store/jobSlice";
+import { fetchApplicants } from "@/store/applicantsSlice";
 import { Briefcase, Plus, Search, Users, Sparkles, MapPin, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,11 +19,13 @@ export default function Jobs() {
   const dispatch = useDispatch();
   const jobs    = useSelector(s => s.jobs.list);
   const loading = useSelector(s => s.jobs.loading);
+  const applicants = useSelector(s => s.applicants.list);
   const [search, setSearch]           = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
   useEffect(() => {
     dispatch(fetchJobs());
+    dispatch(fetchApplicants());
   }, [dispatch]);
 
   const filtered = jobs.filter((j) => {
@@ -135,7 +138,7 @@ export default function Jobs() {
               </div>
               <div className="flex items-center justify-between mt-4 pt-3 border-t border-border">
                 <span className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Users className="w-3 h-3" /> {job.applicant_count || 0} applicants
+                  <Users className="w-3 h-3" /> {(applicants as any[]).filter(a => { const id = a.jobId || a.job_id; return id && (String(id) === String(job.id) || String(id) === String(job._id)); }).length} applicants
                 </span>
                 <span className="text-xs text-primary font-medium opacity-0 group-hover:opacity-100 transition-opacity">
                   View Details →

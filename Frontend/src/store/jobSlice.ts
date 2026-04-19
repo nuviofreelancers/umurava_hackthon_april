@@ -24,6 +24,14 @@ const jobsSlice = createSlice({
   } as JobState,
   reducers: {
     clearSelected: (state) => { state.selected = null; },
+    removeJobOptimistic: (state, action) => {
+      state.list = (state.list as { id: string }[]).filter(j => j.id !== action.payload);
+      if ((state.selected as { id: string } | null)?.id === action.payload) state.selected = null;
+    },
+    restoreJobOptimistic: (state, action) => {
+      // Put the job back at the front if it was undone
+      (state.list as unknown[]).unshift(action.payload);
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -59,5 +67,5 @@ const jobsSlice = createSlice({
   },
 });
 
-export const { clearSelected } = jobsSlice.actions;
+export const { clearSelected, removeJobOptimistic, restoreJobOptimistic } = jobsSlice.actions;
 export default jobsSlice.reducer;

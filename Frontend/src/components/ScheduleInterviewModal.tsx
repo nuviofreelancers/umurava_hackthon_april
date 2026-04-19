@@ -52,7 +52,7 @@ export default function ScheduleInterviewModal({ applicant, jobTitle, onClose, o
         interview_link: interviewType === "online" ? form.interview_link : "",
         interview_location: interviewType === "offline" ? form.interview_location : "",
         interview_notes: form.interview_notes,
-        interview_status: "Interview Scheduled",
+        interview_status: "scheduled",
         interview_reminder_at: reminderDateTime.toISOString(),
       });
 

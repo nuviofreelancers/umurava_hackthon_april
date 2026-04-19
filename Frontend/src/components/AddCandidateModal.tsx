@@ -71,7 +71,7 @@ export default function AddCandidateModal({ jobs, onClose, onAdded }) {
               onClick={() => setUploadMode(m => !m)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border hover:bg-muted transition-colors text-muted-foreground"
             >
-              {uploadMode ? <><PenLine className="w-3.5 h-3.5" /> Manual Entry</> : <><Upload className="w-3.5 h-3.5" /> Upload CSV / JSON</>}
+              {uploadMode ? <><PenLine className="w-3.5 h-3.5" /> Manual Entry</> : <><Upload className="w-3.5 h-3.5" /> Upload CV or Bulk</>}
             </button>
             <button onClick={onClose} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
           </div>

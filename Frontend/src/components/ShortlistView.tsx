@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Download, GitCompare, CalendarPlus } from "lucide-react";
+import { Download, GitCompare, CalendarPlus, AlertTriangle, X } from "lucide-react";
 import ScoreBadge from "./ScoreBadge";
 import ConfidenceBadge from "./ConfidenceBadge";
 import ReasoningPanel from "./ReasoningPanel";
@@ -16,6 +16,7 @@ export default function ShortlistView({ results, applicants, job }) {
   const [showTop, setShowTop]       = useState(10);
   const [sortBy, setSortBy]         = useState("rank");
   const [scheduling, setScheduling] = useState(false); // open the modal
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
   const sorted = [...results].sort((a, b) => {
     if (sortBy === "rank")       return a.rank - b.rank;
@@ -51,12 +52,54 @@ export default function ShortlistView({ results, applicants, job }) {
     URL.revokeObjectURL(url);
   };
 
+
+  // ── Incomplete profile detection ──────────────────────────────────────────
+  // Candidates who are in the results but have low profile_completeness
+  // (missing core fields that may have hurt their score)
+  const incompleteInResults = results.filter(r => {
+    const applicant = applicants.find(a => a.id === r.applicant_id);
+    return applicant && (applicant.profile_completeness ?? 100) < 60;
+  });
+
   if (results.length === 0) {
     return <EmptyState icon={Sparkles} title="No screening results yet" description="Run AI screening to see your ranked shortlist" />;
   }
 
   return (
     <div className="space-y-4">
+      {/* ── Incomplete profiles banner ─────────────────────────────────────── */}
+      {!bannerDismissed && incompleteInResults.length > 0 && (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-800">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-amber-500" />
+          <div className="flex-1 text-xs">
+            <p className="font-semibold">
+              {incompleteInResults.length} candidate{incompleteInResults.length > 1 ? "s" : ""} may have scored lower due to incomplete profiles
+            </p>
+            <p className="text-amber-600 mt-0.5">
+              Their resumes were missing key fields (skills, experience, or role). Review their profiles before making a final decision.
+            </p>
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {incompleteInResults.map(r => (
+                <a
+                  key={r.applicant_id}
+                  href={`/candidates/${r.applicant_id}`}
+                  className="inline-flex items-center px-2 py-0.5 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-800 text-[11px] font-medium transition-colors"
+                >
+                  {r.applicant_name}
+                </a>
+              ))}
+            </div>
+          </div>
+          <button
+            onClick={() => setBannerDismissed(true)}
+            className="text-amber-400 hover:text-amber-600 transition-colors shrink-0"
+            title="Dismiss"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* ── Controls bar ────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-2 flex-wrap">

@@ -48,7 +48,11 @@ export default function Candidates() {
     );
   });
 
-  const getJobTitle = (jobId) => jobs.find(j => j.id === jobId)?.title || "Unknown";
+  const getJobTitle = (jobId) => {
+    if (!jobId) return "Unknown";
+    const jobIdStr = String(jobId);
+    return jobs.find(j => String(j.id) === jobIdStr || String((j as any)._id) === jobIdStr)?.title || "Unknown";
+  };
   const getResult   = (applicantId) => results.find(r => r.applicant_id === applicantId);
 
   const exportCSV = () => {

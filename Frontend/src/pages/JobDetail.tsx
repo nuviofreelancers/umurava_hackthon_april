@@ -1,7 +1,7 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
-import { fetchJob, updateJob, deleteJob } from "@/store/jobSlice";
+import { fetchJob, updateJob, deleteJob, removeJobOptimistic, restoreJobOptimistic } from "@/store/jobSlice";
 import { fetchApplicantsByJob } from "@/store/applicantsSlice";
 import { fetchResultsByJob, runScreening, deleteResultsByJob } from "@/store/resultsSlice";
 import { applicants as applicantsApi } from "@/api/backend";
@@ -25,11 +25,12 @@ export default function JobDetail() {
 
   const job              = useSelector((s: any) => s.jobs.selected);
   const applicantsList   = useSelector((s: any) => s.applicants.list);
-  const resultsList      = useSelector((s: any) => [...s.results.list].sort((a: any, b: any) => a.rank - b.rank));
+  const resultsList      = useSelector((s: any) => s.results.list as any[]);
   const screeningRunning = useSelector((s: any) => s.results.screening);
   const screeningProgress = useSelector((s: any) => s.results.progress);
   const loading          = useSelector((s: any) => s.jobs.loading);
 
+  const sortedResults    = useMemo(() => [...resultsList].sort((a, b) => a.rank - b.rank), [resultsList]);
   const [weights, setWeights]           = useState({ skills: 40, experience: 30, education: 15, relevance: 15 });
   const [shortlistSize, setShortlistSize] = useState<number>(10);
 
@@ -64,27 +65,38 @@ export default function JobDetail() {
   const handleDeleteJob = () => {
     if (!job) return;
     let undone = false;
+
+    // Optimistically remove from Redux immediately so the list updates at once
+    dispatch(removeJobOptimistic(id!));
+    navigate("/jobs");
+
     const { dismiss } = toast({
-      title: `"${job.title}" will be deleted`,
-      description: "Undo within 30 seconds.",
-      duration: 30000,
+      title: `"${job.title}" deleted`,
+      description: "Undo within 5 seconds.",
+      duration: 5000,
       action: (
         <button
-          onClick={() => { undone = true; dismiss(); }}
+          onClick={() => {
+            undone = true;
+            dismiss();
+            // Restore the job in Redux and go back
+            dispatch(restoreJobOptimistic(job));
+            navigate(`/jobs/${id}`);
+          }}
           className="px-3 py-1 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
         >Undo</button>
       ),
     });
-    navigate("/jobs");
+
     setTimeout(async () => {
       if (!undone) {
         try {
           await dispatch(deleteResultsByJob(id!) as any);
           for (const a of applicantsList as any[]) await applicantsApi.delete(a.id);
           await dispatch(deleteJob(id!) as any);
-        } catch { /* silent — user already navigated away */ }
+        } catch { /* silent */ }
       }
-    }, 30000);
+    }, 5000);
   };
 
   if (loading) {
@@ -128,13 +140,13 @@ export default function JobDetail() {
 
       {screeningRunning && <ScreeningProgress progress={screeningProgress} />}
 
-      <Tabs defaultValue={resultsList.length > 0 ? "shortlist" : "applicants"} className="space-y-4">
+      <Tabs defaultValue={sortedResults.length > 0 ? "shortlist" : "applicants"} className="space-y-4">
         <TabsList>
           <TabsTrigger value="applicants" className="gap-1.5">
             <Users className="w-3.5 h-3.5" /> Applicants ({applicantsList.length})
           </TabsTrigger>
           <TabsTrigger value="shortlist" className="gap-1.5">
-            <Sparkles className="w-3.5 h-3.5" /> Shortlist ({resultsList.length})
+            <Sparkles className="w-3.5 h-3.5" /> Shortlist ({sortedResults.length})
           </TabsTrigger>
         </TabsList>
 
@@ -198,7 +210,7 @@ export default function JobDetail() {
         </TabsContent>
 
         <TabsContent value="shortlist">
-          <ShortlistView results={resultsList} applicants={applicantsList} job={job} />
+          <ShortlistView results={sortedResults} applicants={applicantsList} job={job} />
         </TabsContent>
       </Tabs>
     </div>

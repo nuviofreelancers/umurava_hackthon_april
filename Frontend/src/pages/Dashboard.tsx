@@ -72,17 +72,23 @@ export default function Dashboard() {
             {activeJobs.length === 0 ? (
               <p className="px-5 py-8 text-center text-muted-foreground text-sm">No active jobs yet</p>
             ) : (
-              activeJobs.slice(0, 5).map(job => (
-                <Link key={job.id} to={`/jobs/${job.id}`} className="flex items-center px-5 py-3.5 hover:bg-muted/50 transition-colors">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm truncate">{job.title}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {job.experience_level} · {job.applicant_count || 0} applicants
-                    </p>
-                  </div>
-                  <ArrowRight className="w-4 h-4 text-muted-foreground shrink-0" />
-                </Link>
-              ))
+              activeJobs.slice(0, 5).map(job => {
+                const count = applicantsList.filter(a => {
+                  const aJobId = (a as any).jobId || (a as any).job_id;
+                  return String(aJobId) === String(job.id) || String(aJobId) === String((job as any)._id);
+                }).length;
+                return (
+                  <Link key={job.id} to={`/jobs/${job.id}`} className="flex items-center px-5 py-3.5 hover:bg-muted/50 transition-colors">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm truncate">{job.title}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {(job as any).experience_level} · {count} applicant{count !== 1 ? "s" : ""}
+                      </p>
+                    </div>
+                    <ArrowRight className="w-4 h-4 text-muted-foreground shrink-0" />
+                  </Link>
+                );
+              })
             )}
           </div>
         </div>

@@ -28,4 +28,7 @@ dist-ssr
 *.sw?
 
 .env
-.vite
+.vite-e 
+.env
+*.env
+!.env.example

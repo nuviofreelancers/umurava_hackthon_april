@@ -12,6 +12,7 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -53,15 +54,40 @@ export default function Login() {
             />
           </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Password</label>
-            <Input
-              type="password"
-              placeholder="••••••••"
+          <div style={{ position: 'relative', width: '100%' }}>
+            <input
+              type={showPassword ? 'text' : 'password'}
+              name="password"
               value={password}
-              onChange={e => setPassword(e.target.value)}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password"
+              required
+              style={{ width: '100%', paddingRight: '45px' }}
             />
-          </div>
+            
+            {/* Toggle Button */}
+            <button
+              type="button"
+              onClick={() => setShowPassword(prev => !prev)}
+              style={{
+                position: 'absolute',
+                right: '8px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '4px',
+                fontSize: '18px',
+                lineHeight: 1,
+                color: '#666'
+              }}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              aria-pressed={showPassword}
+            >
+              {showPassword ? '🙈' : '👁️'}
+            </button>
+        </div>
 
           {error && (
             <p className="text-sm text-destructive">{error}</p>
