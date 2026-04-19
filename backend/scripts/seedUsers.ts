@@ -8,23 +8,27 @@ const seedUsers = async () => {
     await mongoose.connect(process.env.MONGODB_URI || '');
     console.log('🌱 Connecting to MongoDB...');
 
-    // Clear only demo accounts to avoid messing with real data
     const demoEmails = [
       'admin@hackathon.dev',
       'hr@hackathon.dev',
-      'recruiter@hackathon.dev',
-      'member4@hackathon.dev' // 🆕 4th team member
+      'member3@hackathon.dev',
+      'member4@hackathon.dev',
+      'judge1@talentscreen.demo',
+      'judge2@talentscreen.demo',
     ];
     await User.deleteMany({ email: { $in: demoEmails } });
 
     const demoUsers = [
-      { full_name: 'Admin Demo', email: 'admin@hackathon.dev', password: 'AdminPass123', role: 'admin' },
-      { full_name: 'M_1', email: 'hr@hackathon.dev', password: 'HRPass123', role: 'hr' },
-      { full_name: 'M_2', email: 'member3@hackathon.dev', password: 'RecruiterPass123', role: 'hr' },
-      { full_name: 'M_4', email: 'member4@hackathon.dev', password: 'TeamPass123', role: 'hr' }
+      // ── Team accounts ────────────────────────────────────────
+      { full_name: 'Admin Demo',  email: 'admin@hackathon.dev',    password: 'AdminPass123',     role: 'admin' },
+      { full_name: 'M_1',         email: 'hr@hackathon.dev',        password: 'HRPass123',        role: 'hr'    },
+      { full_name: 'M_2',         email: 'member3@hackathon.dev',   password: 'RecruiterPass123', role: 'hr'    },
+      { full_name: 'M_4',         email: 'member4@hackathon.dev',   password: 'TeamPass123',      role: 'hr'    },
+      // ── Judge accounts ───────────────────────────────────────
+      { full_name: 'Judge One',   email: 'judge1@talentscreen.demo', password: 'Judge#Demo1',     role: 'hr'    },
+      { full_name: 'Judge Two',   email: 'judge2@talentscreen.demo', password: 'Judge#Demo2',     role: 'hr'    },
     ];
 
-    // Hash passwords & create users
     for (const userData of demoUsers) {
       const hashedPassword = await bcrypt.hash(userData.password, 10);
       await User.create({ ...userData, password: hashedPassword });
@@ -32,9 +36,12 @@ const seedUsers = async () => {
     }
 
     console.log('\n🔑 Team Login Credentials:');
-    demoUsers.forEach(u => console.log(`   ${u.email} / ${u.password}`));
-    console.log('✅ Seeding complete!');
+    demoUsers.slice(0, 4).forEach(u => console.log(`   ${u.email} / ${u.password}`));
 
+    console.log('\n👨‍⚖️  Judge Login Credentials:');
+    demoUsers.slice(4).forEach(u => console.log(`   ${u.email} / ${u.password}`));
+
+    console.log('\n✅ Seeding complete!');
     await mongoose.connection.close();
     process.exit(0);
   } catch (error) {

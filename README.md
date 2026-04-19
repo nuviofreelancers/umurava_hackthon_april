@@ -4,6 +4,26 @@
 
 ---
 
+## 🚀 Live Demo
+
+| | |
+|---|---|
+| **Frontend** | https://umurava-hackthon-april.vercel.app |
+| **Backend**  | https://umurava-hackthon-april-snid.onrender.com |
+
+### Judge Login Credentials
+
+Two isolated accounts are pre-loaded — each judge gets their own sandbox with no data crossover.
+
+| Account | Email | Password |
+|---|---|---|
+| Judge 1 | `judge1@talentscreen.demo` | `Judge#Demo1` |
+| Judge 2 | `judge2@talentscreen.demo` | `Judge#Demo2` |
+
+> Each account is fully isolated — jobs, candidates, and screening results created by one judge are not visible to the other.
+
+---
+
 ## Architecture Diagram
 
 ```mermaid
@@ -15,7 +35,7 @@ graph TD
         Auth[AuthContext\nJWT in localStorage]
     end
 
-    subgraph Server ["Backend — Express + TypeScript (Railway/Render)"]
+    subgraph Server ["Backend — Express + TypeScript (Render)"]
         Routes[Express Routes]
         Controllers[Controllers\napplicant · job · screening · auth]
         Middleware[protect middleware\nJWT verify]
@@ -49,8 +69,6 @@ graph TD
     AIService --> Gemini
     FileUtils --> GoogleDrive
 ```
-
-> **File:** An architecture diagram in Mermaid format is embedded above. Paste it into [mermaid.live](https://mermaid.live) to render it visually.
 
 ---
 
@@ -104,7 +122,7 @@ cd backend
 npx ts-node scripts/seedUsers.ts
 ```
 
-This creates the default HR user account.
+This creates all team accounts and the two judge demo accounts.
 
 #### 4. Run the development servers
 
@@ -124,11 +142,11 @@ Open `http://localhost:5173` in your browser.
 
 ### Production Deployment
 
-#### Backend → Railway (or Render)
+#### Backend → Render
 
 1. Push your backend code to a GitHub repository.
-2. Create a new project on [Railway](https://railway.app) and connect the repo.
-3. Set the following environment variables in the Railway dashboard:
+2. Create a new Web Service on [Render](https://render.com) and connect the repo.
+3. Set the following environment variables in the Render dashboard:
 
 ```
 PORT=3000
@@ -138,31 +156,24 @@ GEMINI_API_KEY=<your Gemini key>
 CLIENT_ORIGIN=https://your-frontend.vercel.app
 ```
 
-4. Railway will auto-detect Node.js and run `npm start`. Make sure your `package.json` has:
-```json
-"scripts": {
-  "start": "node dist/src/server.js",
-  "build": "tsc"
-}
-```
-5. Railway will give you a public URL like `https://backend-production-xxxx.up.railway.app`.
+4. Set **Build Command** to `npm install && npm run build` and **Start Command** to `npm start`.
 
 #### Frontend → Vercel
 
 1. Push your frontend code to GitHub.
 2. Import the project on [Vercel](https://vercel.com).
-3. Set the following environment variable in the Vercel project settings:
+3. Set the environment variable in Vercel project settings:
 
 ```
-VITE_API_BASE_URL=https://your-backend.up.railway.app/api
+VITE_API_BASE_URL=https://your-backend.onrender.com/api
 ```
 
-4. Vercel auto-detects Vite. The build command is `npm run build`, output directory is `dist`.
-5. Every `git push` to `main` will trigger a new deployment automatically — this is how you push bug fixes for your team to review on the fly.
+4. Vercel auto-detects Vite. Build command is `npm run build`, output directory is `dist`.
 
 #### Post-deployment checklist
 
-- [ ] Test login with seeded credentials
+- [ ] Run `npx ts-node scripts/seedUsers.ts` against the production DB to create judge accounts
+- [ ] Test login with judge credentials
 - [ ] Create a job
 - [ ] Upload a PDF resume and verify it parses correctly
 - [ ] Run AI screening on the job
@@ -187,7 +198,7 @@ VITE_API_BASE_URL=https://your-backend.up.railway.app/api
 
 | Variable | Required | Description |
 |---|---|---|
-| `VITE_API_BASE_URL` | **Yes** | Full backend API base URL including `/api` (e.g. `https://your-backend.up.railway.app/api`) |
+| `VITE_API_BASE_URL` | **Yes** | Full backend API base URL including `/api` |
 
 > ⚠️ Never commit `.env` files. Add them to `.gitignore`.
 
@@ -222,13 +233,9 @@ Gemini returns a ranked list of candidates with:
 - `recommendation` (Strong Yes / Yes / Maybe / No)
 - `strengths[]` — reasons the candidate is a good fit
 - `gaps[]` — missing qualifications (with dealbreaker vs nice-to-have classification)
-- `bias_flags[]` — any detected potential bias indicators (name, graduation year, institution prestige)
+- `bias_flags[]` — any detected potential bias indicators
 
-The previous screening results for that job are **deleted** before the new results are inserted. This ensures results always reflect the current candidate pool.
-
-### 3. AI Job Recommendations (Planned Feature)
-
-A planned feature will match candidates against other open jobs in the database if they score ≥ 70% match. This is not yet fully implemented.
+The previous screening results for that job are **deleted** before the new results are inserted, ensuring results always reflect the current candidate pool.
 
 ---
 
@@ -237,20 +244,17 @@ A planned feature will match candidates against other open jobs in the database 
 ### Assumptions
 
 - **Single-tenant:** Each user account is siloed — they can only see jobs and candidates they created. There is no team/organisation layer.
-- **English-language resumes:** The Gemini prompt and OCR pipeline are optimised for English. Non-English resumes may extract with reduced accuracy.
-- **Gemini availability:** The AI features depend entirely on Google Gemini being reachable. If the API is down or returns 503, uploads and screenings will fail gracefully with an error message.
-- **Google Drive links are public:** The URL-based CV upload resolves Google Drive share links, but the file must be shared as "Anyone with the link" — private files cannot be accessed.
-- **Honest AI scores:** Gemini is instructed to score honestly and not pad scores. Candidates with mostly empty data will receive low scores and a "Low" confidence level.
+- **English-language resumes:** The Gemini prompt and OCR pipeline are optimised for English.
+- **Gemini availability:** AI features depend on Google Gemini being reachable. If the API is down, uploads and screenings will fail gracefully with an error message.
+- **Google Drive links are public:** The URL-based CV upload requires files shared as "Anyone with the link."
 
 ### Limitations
 
-- **No resume deduplication:** If the same candidate's resume is uploaded twice, they will be created as two separate records. A duplicate check (by email + jobId) needs to be added.
-- **No token refresh:** JWTs are issued without expiry rotation. An expired token requires the user to log out and log back in.
-- **File size limit:** The Express body parser is limited to 10MB. Large image files (for OCR) may be rejected.
-- **CSV parsing is naive:** The CSV parser splits by comma, which breaks for values that contain commas (e.g. a skill like "Python, R"). A proper CSV library (e.g. `papaparse`) should be used for robust parsing.
-- **`sourceType` enum gap:** The Applicant model enum for `sourceType` includes `manual`, `pdf`, `csv`, `json` but not `docx` or `image_ocr`. Mongoose will silently reject those values. This needs to be fixed in the schema.
-- **No pagination:** All candidates and results are returned in a single API call. This will degrade with large datasets.
-- **Gemini context window:** Very long resumes (>10,000 words) may be truncated or cause higher latency.
+- **No self-registration:** Accounts are created by seeding. This is intentional for an internal HR tool — an admin provisions accounts.
+- **No resume deduplication:** The same candidate uploaded twice creates two records.
+- **No token refresh:** An expired token requires the user to log out and back in.
+- **File size limit:** Express body parser is limited to 10MB.
+- **No pagination:** All candidates and results are returned in a single API call.
 
 ---
 
@@ -258,21 +262,16 @@ A planned feature will match candidates against other open jobs in the database 
 
 ### CV Extraction Prompt Design
 
-The CV extraction prompt uses several techniques to produce reliable, structured output:
-
-- **Role framing:** Opens with "You are a precise ATS data extraction engine" to set context and constrain behaviour.
-- **Negative rules first:** Explicitly tells the model what NOT to do (guess, hallucinate, include commentary) before the positive rules.
-- **Explicit null handling:** "If a field cannot be found, return null — never guess." This prevents the model from filling in plausible-sounding but wrong data.
-- **Array defaults:** "Return an empty array `[]` if nothing is found. Do NOT return a placeholder object inside the array." — prevents fake entries in skill/experience lists.
-- **Canonical enum values:** Skill levels and education levels are given as explicit allowed values so the model doesn't invent its own.
-- **JSON-only output:** The prompt ends with "Return ONLY valid JSON. No markdown fences, no explanation, no preamble." Response cleaning strips any stray backtick fences before parsing.
-- **Not-a-resume escape hatch:** Instructs the model to return `{ "error": "not_a_resume" }` for non-resume content, which the backend detects and returns a 422 to the user.
+- **Role framing:** "You are a precise ATS data extraction engine"
+- **Negative rules first:** Explicitly tells the model what NOT to do before positive rules
+- **Explicit null handling:** "If a field cannot be found, return null — never guess"
+- **JSON-only output:** Response cleaning strips any stray backtick fences before parsing
+- **Not-a-resume escape hatch:** Returns `{ "error": "not_a_resume" }` for non-resume content
 
 ### Screening Prompt Design
 
-- **Unbiased recruiter framing:** "You are an expert, unbiased AI recruiter" — primes the model to score on merit.
-- **Weights as percentages in prompt:** The user-configured weights are injected directly into the prompt text so the model's scoring logic reflects them.
-- **Hard scoring rule:** "A candidate missing more than 2 required skills must score below 50 overall" — prevents padding of weak candidates.
-- **Structured recommendation enum:** `recommendation` must be exactly one of four values — prevents free-text that would break frontend rendering.
-- **Bias flag instruction:** The model is asked to flag potential bias indicators (name origin, institution prestige, graduation year implying age) — these are surfaced to the HR user for awareness.
-- **Top-N control:** `shortlistSize` is injected into the prompt so Gemini only returns the requested number of candidates rather than all of them.
+- **Unbiased recruiter framing:** "You are an expert, unbiased AI recruiter"
+- **Weights as percentages in prompt:** User-configured weights injected directly into prompt text
+- **Hard scoring rule:** "A candidate missing more than 2 required skills must score below 50 overall"
+- **Bias flag instruction:** Model flags potential bias indicators surfaced to the HR user
+- **Top-N control:** `shortlistSize` injected into the prompt so Gemini returns only the requested number
