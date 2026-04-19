@@ -2,15 +2,15 @@ import 'dotenv/config';
 
 import express from "express";
 import cors from "cors";
-import { connectDB } from "../config/db";
+import { connectDB } from "./config/db";
 
-import authRouter from "../routes/authRoutes";
-import jobRouter from "../routes/jobRoutes";
-import applicantRouter from "../routes/applicantRoutes";
-import { uploadRouter } from "../routes/applicantRoutes";
-import screeningRouter from "../routes/screeningRoutes";
-import { screenRouter } from "../routes/screeningRoutes";
-import interviewRouter from "../routes/interviewRoutes";
+import authRouter from "./routes/authRoutes";
+import jobRouter from "./routes/jobRoutes";
+import applicantRouter from "./routes/applicantRoutes";
+import { uploadRouter } from "./routes/applicantRoutes";
+import screeningRouter from "./routes/screeningRoutes";
+import { screenRouter } from "./routes/screeningRoutes";
+import interviewRouter from "./routes/interviewRoutes";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
