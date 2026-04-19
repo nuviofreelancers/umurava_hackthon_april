@@ -90,7 +90,9 @@ export const deleteApplicant = async (req: AuthRequest, res: Response) => {
   try {
     const applicant = await Applicant.findOneAndDelete({ _id: req.params.id, userId: req.user!.id });
     if (!applicant) return res.status(404).json({ message: "Applicant not found" });
-    await ScreeningResult.deleteMany({ applicant_id: req.params.id });
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ message: "Missing id" });
+    await ScreeningResult.deleteMany({ applicant_id: id });
     res.json({ message: "Applicant deleted successfully" });
   } catch (error) {
     console.error(error);
@@ -393,7 +395,9 @@ export const parseUploadedCandidates = async (req: Request, res: Response) => {
       const text = buffer.toString("utf-8");
       const lines = text.split("\n").filter(l => l.trim());
       if (lines.length < 2) return res.status(400).json({ message: "CSV appears empty or has no data rows" });
-      const headers = lines[0].split(",").map(h => h.trim().replace(/"/g, ""));
+      const firstLine = lines[0];
+      if (!firstLine) return res.status(400).json({ message: "Empty CSV" });
+      const headers = firstLine.split(",").map(h => h.trim().replace(/"/g, ""));
       const candidates = lines.slice(1).map(line => {
         const values = line.split(",").map(v => v.trim().replace(/"/g, ""));
         const obj: any = {};
@@ -449,7 +453,9 @@ export const parseUploadedJobs = async (req: Request, res: Response) => {
       const text = buffer.toString("utf-8");
       const lines = text.split("\n").filter(l => l.trim());
       if (lines.length < 2) return res.status(400).json({ message: "CSV appears empty or has no data rows" });
-      const headers = lines[0].split(",").map(h => h.trim().replace(/"/g, ""));
+      const firstLine = lines[0];
+      if (!firstLine) return res.status(400).json({ message: "Empty CSV" });
+      const headers = firstLine.split(",").map(h => h.trim().replace(/"/g, ""));
       const jobs = lines.slice(1).map(line => {
         const values = line.split(",").map(v => v.trim().replace(/"/g, ""));
         const obj: any = {};

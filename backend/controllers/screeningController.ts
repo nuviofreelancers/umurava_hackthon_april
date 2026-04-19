@@ -106,8 +106,10 @@ export const getResults = async (req: AuthRequest, res: Response) => {
 // DELETE /api/results/by-job/:jobId
 export const deleteResultsByJob = async (req: AuthRequest, res: Response) => {
   try {
-    const { jobId } = req.params;
+    const jobId = req.params.id;
     const job = await Job.findOne({ _id: jobId, userId: req.user!.id });
+    if (!jobId || Array.isArray(jobId)) return res.status(400).json({ message: "Invalid id" });
+    await ScreeningResult.deleteMany({ job_id: new mongoose.Types.ObjectId(jobId) });
     if (!job) return res.status(404).json({ message: "Job not found" });
     const { deletedCount } = await ScreeningResult.deleteMany({ job_id: new mongoose.Types.ObjectId(jobId) });
     res.json({ message: `${deletedCount} results deleted` });
@@ -120,7 +122,9 @@ export const deleteResultsByJob = async (req: AuthRequest, res: Response) => {
 // DELETE /api/results/by-applicant/:id
 export const deleteResultsByApplicant = async (req: AuthRequest, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id;
+    if (!id || Array.isArray(id)) return res.status(400).json({ message: "Invalid id" });
+    await ScreeningResult.deleteMany({ applicant_id: new mongoose.Types.ObjectId(id) });
     const { deletedCount } = await ScreeningResult.deleteMany({ applicant_id: new mongoose.Types.ObjectId(id) });
     res.json({ message: `${deletedCount} results deleted` });
   } catch (error) {

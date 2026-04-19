@@ -62,8 +62,10 @@ export const deleteJob = async (req: AuthRequest, res: Response) => {
   try {
     const job = await Job.findOneAndDelete({ _id: req.params.id, userId: req.user!.id });
     if (!job) return res.status(404).json({ message: "Job not found" });
-    await ScreeningResult.deleteMany({ job_id: req.params.id });
-    await Applicant.deleteMany({ jobId: req.params.id });
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ message: "Missing id" });
+    await ScreeningResult.deleteMany({ job_id: id });
+    await Applicant.deleteMany({ jobId: id });
     res.json({ message: "Job deleted successfully" });
   } catch (error) {
     console.error(error);
