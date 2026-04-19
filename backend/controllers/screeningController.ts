@@ -112,7 +112,8 @@ export const getResults = async (req: AuthRequest, res: Response) => {
 // DELETE /api/results/by-job/:jobId
 export const deleteResultsByJob = async (req: AuthRequest, res: Response) => {
   try {
-    const { jobId } = req.params;
+    const jobId = req.params.jobId;
+    if (!jobId || Array.isArray(jobId)) return res.status(400).json({ message: "Invalid jobId" });
     const job = await Job.findOne({ _id: jobId, userId: req.user!.id });
     if (!job) return res.status(404).json({ message: "Job not found" });
     const { deletedCount } = await ScreeningResult.deleteMany({ job_id: new mongoose.Types.ObjectId(jobId) });
