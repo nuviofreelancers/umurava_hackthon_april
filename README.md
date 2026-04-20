@@ -4,7 +4,7 @@
 
 ---
 
-## 🚀 Live Demo
+## Live Demo
 
 | | |
 |---|---|
