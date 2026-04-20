@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { fetchJob, updateJob, deleteJob, removeJobOptimistic, restoreJobOptimistic } from "@/store/jobSlice";
-import { fetchApplicantsByJob } from "@/store/applicantsSlice";
+import { fetchApplicantsByJob, clearApplicants } from "@/store/applicantsSlice";
 import { fetchResultsByJob, runScreening, deleteResultsByJob } from "@/store/resultsSlice";
 import { applicants as applicantsApi } from "@/api/backend";
 import { Button } from "@/components/ui/button";
@@ -36,7 +36,9 @@ export default function JobDetail() {
 
   const loadData = useCallback(() => {
     dispatch(fetchJob(id!) as any);
-    dispatch(fetchApplicantsByJob(id!) as any);
+    // FIX: clear stale candidates first so previous job's list doesn't flash
+    dispatch(clearApplicants());
+    dispatch(fetchApplicantsByJob({ jobId: id! }) as any);
     dispatch(fetchResultsByJob(id!) as any);
   }, [id, dispatch]);
 

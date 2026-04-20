@@ -27,10 +27,10 @@ export default function JobCsvPreview() {
         const parsed = JSON.parse(raw);
         setJobs(parsed);
       } else {
-        navigate("/jobs/new");
+        navigate("/jobs");
       }
     } catch {
-      navigate("/jobs/new");
+      navigate("/jobs");
     }
   }, []);
 
@@ -95,7 +95,7 @@ export default function JobCsvPreview() {
       {/* Top bar */}
       <div className="flex items-center justify-between mb-5 shrink-0">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate("/jobs/new")} className="text-muted-foreground hover:text-foreground transition-colors">
+          <button onClick={() => navigate("/jobs")} className="text-muted-foreground hover:text-foreground transition-colors">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
@@ -106,7 +106,7 @@ export default function JobCsvPreview() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="outline" onClick={() => navigate("/jobs/new")}>Cancel</Button>
+          <Button variant="outline" onClick={() => navigate("/jobs")}>Cancel</Button>
           <Button
             onClick={handleImport}
             disabled={saving || validCount === 0}

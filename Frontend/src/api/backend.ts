@@ -1,5 +1,14 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
+// FIX: centralised 401 handler — when token expires, clear it and redirect to login
+function handleUnauthorized() {
+  localStorage.removeItem("hr_token");
+  // Only redirect if not already on the login page
+  if (!window.location.pathname.startsWith("/login")) {
+    window.location.href = "/login?session=expired";
+  }
+}
+
 async function request<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem("hr_token");
   const res = await fetch(`${API_BASE}${path}`, {
@@ -11,10 +20,15 @@ async function request<T = unknown>(path: string, options: RequestInit = {}): Pr
     ...options,
   });
 
+  // FIX: 401 = token expired or invalid — auto-logout
+  if (res.status === 401) {
+    handleUnauthorized();
+    throw Object.assign(new Error("Session expired. Please sign in again."), { status: 401 });
+  }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: res.statusText }));
-    const error = Object.assign(new Error(err.message || "Request failed"), { status: res.status });
-    throw error;
+    throw Object.assign(new Error(err.message || "Request failed"), { status: res.status });
   }
 
   return res.json() as Promise<T>;
@@ -22,12 +36,12 @@ async function request<T = unknown>(path: string, options: RequestInit = {}): Pr
 
 // ─── Auth ────────────────────────────────────────────────────
 export const auth = {
-  login:    (email: string, password: string) =>
+  login: (email: string, password: string) =>
     request<{ token: string; user: { id: string; full_name: string; email: string } }>(
       "/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }
     ),
   me:       () => request<{ id: string; full_name: string; email: string }>("/auth/me"),
-  updateMe: (data: Partial<{ full_name: string; email: string; password: string }>) =>
+  updateMe: (data: Partial<{ full_name: string; email: string; password: string; phone_number?: string; specialisation?: string; bio?: string }>) =>
     request("/auth/me", { method: "PUT", body: JSON.stringify(data) }),
   logout: () => {
     localStorage.removeItem("hr_token");
@@ -44,18 +58,20 @@ export const jobs = {
   delete: (id: string)                => request<unknown>(`/jobs/${id}`, { method: "DELETE" }),
 };
 
-// ─── Applicants ──────────────────────────────────────────────
+// ─── Applicants — FIX: supports pagination via ?page=&limit= ─────────────────
 export const applicants = {
-  list:       ()                                                         => request<unknown[]>("/applicants"),
-  listByJob:  (jobId: string)                                            => request<unknown[]>(`/applicants?job_id=${jobId}`),
-  get:        (id: string)                                               => request<unknown>(`/applicants/${id}`),
-  create:     (data: unknown)                                            => request<unknown>("/applicants", { method: "POST", body: JSON.stringify(data) }),
-  bulkCreate: (data: unknown[], jobId?: string, sourceType?: string)     => request<unknown[]>("/applicants/bulk", {
-    method: "POST",
-    body: JSON.stringify({ applicants: data, job_id: jobId, sourceType }),
-  }),
-  update:     (id: string, data: unknown)                                => request<unknown>(`/applicants/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-  delete:     (id: string)                                               => request<unknown>(`/applicants/${id}`, { method: "DELETE" }),
+  list:       (page = 1, limit = 30)  => request<unknown[]>(`/applicants?page=${page}&limit=${limit}`),
+  listByJob:  (jobId: string, page = 1, limit = 50) =>
+    request<unknown[]>(`/applicants?job_id=${jobId}&page=${page}&limit=${limit}`),
+  get:        (id: string)            => request<unknown>(`/applicants/${id}`),
+  create:     (data: unknown)         => request<unknown>("/applicants", { method: "POST", body: JSON.stringify(data) }),
+  bulkCreate: (data: unknown[], jobId?: string, sourceType?: string) =>
+    request<unknown>("/applicants/bulk", {
+      method: "POST",
+      body: JSON.stringify({ applicants: data, job_id: jobId, sourceType }),
+    }),
+  update:     (id: string, data: unknown) => request<unknown>(`/applicants/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  delete:     (id: string)               => request<unknown>(`/applicants/${id}`, { method: "DELETE" }),
 };
 
 // ─── Screening Results ────────────────────────────────────────
@@ -76,19 +92,28 @@ export const screening = {
     }),
 };
 
-// ─── File Upload ──────────────────────────────────────────────
+// ─── File Upload ─────────────────────────────────────────────
+async function uploadFetch(url: string, init: RequestInit): Promise<Response> {
+  const res = await fetch(url, init);
+  if (res.status === 401) { handleUnauthorized(); throw Object.assign(new Error("Session expired."), { status: 401 }); }
+  return res;
+}
+
 export const uploads = {
   parseCandidates: async (file: File, jobId?: string): Promise<unknown> => {
     const formData = new FormData();
     formData.append("file", file);
     if (jobId) formData.append("job_id", jobId);
     const token = localStorage.getItem("hr_token");
-    const res = await fetch(`${API_BASE}/upload/candidates`, {
+    const res = await uploadFetch(`${API_BASE}/upload/candidates`, {
       method: "POST",
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: formData,
     });
-    if (!res.ok) throw new Error("Upload failed");
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: "Upload failed" }));
+      throw new Error(err.message || "Upload failed");
+    }
     return res.json();
   },
 
@@ -96,18 +121,21 @@ export const uploads = {
     const formData = new FormData();
     formData.append("file", file);
     const token = localStorage.getItem("hr_token");
-    const res = await fetch(`${API_BASE}/upload/jobs`, {
+    const res = await uploadFetch(`${API_BASE}/upload/jobs`, {
       method: "POST",
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: formData,
     });
-    if (!res.ok) throw new Error("Upload failed");
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: "Upload failed" }));
+      throw new Error(err.message || "Upload failed");
+    }
     return res.json();
   },
 
   parseCandidateFromUrl: async (url: string, jobId?: string): Promise<unknown> => {
     const token = localStorage.getItem("hr_token");
-    const res = await fetch(`${API_BASE}/upload/candidates`, {
+    const res = await uploadFetch(`${API_BASE}/upload/candidates`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -122,4 +150,3 @@ export const uploads = {
     return res.json();
   },
 };
-

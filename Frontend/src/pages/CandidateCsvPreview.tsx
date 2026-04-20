@@ -42,7 +42,6 @@ function CandidateEditor({ candidate, onChange, onRemove }) {
 
   return (
     <div className="flex-1 bg-card border border-border rounded-xl flex flex-col overflow-hidden min-w-0">
-      {/* Card header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
         <div>
           <h2 className="font-heading font-semibold text-base">
@@ -56,6 +55,7 @@ function CandidateEditor({ candidate, onChange, onRemove }) {
           )}
         </div>
         <button
+          type="button"
           onClick={onRemove}
           className="p-2 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
           title="Remove this candidate"
@@ -64,7 +64,6 @@ function CandidateEditor({ candidate, onChange, onRemove }) {
         </button>
       </div>
 
-      {/* Scrollable fields */}
       <div className="flex-1 overflow-y-auto p-6">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
           <div>
@@ -116,7 +115,6 @@ function CandidateEditor({ candidate, onChange, onRemove }) {
             <Input value={candidate.portfolio_url ?? ""} onChange={e => update("portfolio_url", e.target.value)} className="mt-1" placeholder="https://..." />
           </div>
 
-          {/* Skills */}
           <div className="sm:col-span-2">
             <Label className="text-xs">Skills</Label>
             <div className="flex gap-2 mt-1">
@@ -139,7 +137,9 @@ function CandidateEditor({ candidate, onChange, onRemove }) {
               {(candidate.skills || []).map(s => (
                 <span key={s.name} className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary rounded-full text-[11px] font-medium">
                   {s.name} · {s.level}
-                  <button onClick={() => removeSkill(s.name)}><X className="w-3 h-3" /></button>
+                  <button type="button" onClick={() => removeSkill(s.name)} className="hover:text-destructive transition-colors">
+                    <X className="w-3 h-3" />
+                  </button>
                 </span>
               ))}
               {(candidate.skills || []).length === 0 && (
@@ -153,7 +153,8 @@ function CandidateEditor({ candidate, onChange, onRemove }) {
   );
 }
 
-// ── Candidate sidebar list ─────────────────────────────────────────────────────
+// ── Candidate sidebar — FIX: outer row is now a <div role="button"> so the
+// inner trash <button> is not nested inside another <button>
 function CandidateSidebar({ candidates, selected, onSelect, onRemove, showWarnings = false }) {
   return (
     <aside className="w-64 shrink-0 flex flex-col bg-card border border-border rounded-xl overflow-hidden">
@@ -165,10 +166,13 @@ function CandidateSidebar({ candidates, selected, onSelect, onRemove, showWarnin
           const isValid  = !!(c.full_name?.trim() && c.email?.trim());
           const isActive = idx === selected;
           return (
-            <button
+            <div
               key={idx}
+              role="button"
+              tabIndex={0}
               onClick={() => onSelect(idx)}
-              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-colors group ${
+              onKeyDown={e => e.key === "Enter" && onSelect(idx)}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-colors group cursor-pointer ${
                 isActive ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted"
               }`}
             >
@@ -190,12 +194,13 @@ function CandidateSidebar({ candidates, selected, onSelect, onRemove, showWarnin
                 )}
               </div>
               <button
+                type="button"
                 onClick={e => { e.stopPropagation(); onRemove(idx); }}
                 className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all shrink-0"
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
-            </button>
+            </div>
           );
         })}
         {candidates.length === 0 && (
@@ -216,20 +221,38 @@ export default function CandidateCsvPreview() {
   const [selectedIssue,  setSelectedIssue]  = useState(0);
   const [saving,   setSaving]   = useState(false);
   const [activeTab, setActiveTab] = useState("valid");
+  const [returnJobId, setReturnJobId] = useState<string | null>(null);
+  // Prevents the "no candidates" redirect firing after a successful save
+  // empties allCandidates before navigation completes
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem("csv_candidates_preview");
       if (raw) {
         const parsed = JSON.parse(raw);
-        setAllCandidates(parsed.map(c => ({ ...c, skills: normSkills(c.skills) })));
+        const tagged = parsed.map(c => ({ ...c, skills: normSkills(c.skills) }));
+        setAllCandidates(tagged);
+        // Check both key names — ApplicantUpload now sends jobId, old data may have job_id
+        const firstJobId = tagged[0]?.jobId || tagged[0]?.job_id || null;
+        setReturnJobId(firstJobId);
       } else {
-        navigate(-1);
+        navigate("/candidates");
       }
     } catch {
-      navigate(-1);
+      navigate("/candidates");
+    } finally {
+      setLoaded(true);
     }
   }, []);
+
+  const handleCancel = () => {
+    sessionStorage.removeItem("csv_candidates_preview");
+    navigate(returnJobId ? `/jobs/${returnJobId}` : "/candidates");
+  };
+
+  // Don't render anything until sessionStorage has been read
+  if (!loaded) return null;
 
   if (allCandidates.length === 0) {
     return (
@@ -239,12 +262,10 @@ export default function CandidateCsvPreview() {
     );
   }
 
-  // Split into valid and needs-review
   const validCandidates = allCandidates.filter(c => !c._nonStandard);
   const issueCandidates = allCandidates.filter(c => c._nonStandard);
 
   const updateCandidate = (c, idx, list, isIssue = false) => {
-    // Recompute _nonStandard live as user fixes fields
     const required = ["full_name", "email", "current_role", "skills"];
     const missingNow = required.filter(f => {
       const v = c[f];
@@ -254,7 +275,6 @@ export default function CandidateCsvPreview() {
 
     setAllCandidates(prev => {
       const all = [...prev];
-      // Find the global index
       let count = -1;
       for (let i = 0; i < all.length; i++) {
         if (!!all[i]._nonStandard === isIssue) { count++; if (count === idx) { all[i] = updated; break; } }
@@ -266,7 +286,7 @@ export default function CandidateCsvPreview() {
   const removeCandidate = (idx, isIssue = false) => {
     setAllCandidates(prev => {
       let count = -1;
-      return prev.filter((c, i) => {
+      return prev.filter((c) => {
         if (!!c._nonStandard === isIssue) { count++; return count !== idx; }
         return true;
       });
@@ -281,23 +301,51 @@ export default function CandidateCsvPreview() {
       : validCandidates.filter(c => c.full_name?.trim() && c.email?.trim());
 
     if (toImport.length === 0) {
-      toast({ title: "No valid candidates", description: "Each candidate needs at least a name and email.", variant: "destructive" });
+      toast({ title: "No valid candidates", description: "Each candidate needs at least a name and email.", variant: "destructive", duration: 3000 });
       return;
     }
     setSaving(true);
     try {
-      const jobId      = (toImport[0] as any).job_id;
+      // Check both key names — jobId is set by ApplicantUpload, job_id may exist in older data
+      const jobId      = (toImport[0] as any).jobId || (toImport[0] as any).job_id;
       const sourceType = (toImport[0] as any).sourceType || "csv";
       const docs = toImport.map(c => {
-        const { job_id: _jid, sourceType: _st, _nonStandard: _ns, _missingFields: _mf, _missingRecommended: _mr, ...rest } = c as any;
-        return { ...rest, profile_completeness: calculateCompleteness(c) };
+        const { job_id: _jid, jobId: _ji, sourceType: _st, _nonStandard: _ns, _missingFields: _mf, _missingRecommended: _mr, ...rest } = c as any;
+        // Pass jobId explicitly on each doc so bulkCreate stores it correctly
+        return { ...rest, jobId: jobId || undefined, profile_completeness: calculateCompleteness(c) };
       });
-      await applicantsApi.bulkCreate(docs, jobId, sourceType);
+
+      const response = await applicantsApi.bulkCreate(docs, jobId, sourceType) as any;
+
+      // FIX: surface duplicate/cross-job warnings from backend
+      const dupWarnings: string[] = response?.duplicateWarnings || [];
+      const crossJobs:   string[] = response?.crossJobMatches   || [];
+
       sessionStorage.removeItem("csv_candidates_preview");
-      toast({ title: `${toImport.length} candidate${toImport.length > 1 ? "s" : ""} imported` });
+
+      const imported = response?.inserted?.length ?? toImport.length;
+      // FIX: auto-dismiss after 3 seconds
+      toast({ title: `${imported} candidate${imported !== 1 ? "s" : ""} imported`, duration: 3000 });
+
+      if (dupWarnings.length > 0) {
+        toast({
+          title: "Already applied to this job",
+          description: `${dupWarnings.join(", ")} ${dupWarnings.length === 1 ? "is" : "are"} already in this job.`,
+          variant: "destructive",
+          duration: 5000,
+        });
+      }
+      if (crossJobs.length > 0) {
+        toast({
+          title: "Candidates found in another job",
+          description: `${crossJobs.join(", ")} previously applied to a different job.`,
+          duration: 5000,
+        });
+      }
+
       navigate(jobId ? `/jobs/${jobId}` : "/candidates");
     } catch {
-      toast({ title: "Import failed", description: "Please try again.", variant: "destructive" });
+      toast({ title: "Import failed", description: "Please try again.", variant: "destructive", duration: 3000 });
     }
     setSaving(false);
   };
@@ -310,11 +358,9 @@ export default function CandidateCsvPreview() {
 
   return (
     <div className="flex flex-col gap-0">
-
-      {/* ── Top bar ──────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between mb-5 shrink-0">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="text-muted-foreground hover:text-foreground transition-colors">
+          <button type="button" onClick={handleCancel} className="text-muted-foreground hover:text-foreground transition-colors">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
@@ -326,22 +372,15 @@ export default function CandidateCsvPreview() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => navigate(-1)}>Cancel</Button>
+          <Button variant="outline" onClick={handleCancel}>Cancel</Button>
           {issueCount > 0 && (
-            <Button
-              variant="outline"
-              onClick={() => handleImport(true)}
-              disabled={saving}
-              className="border-amber-300 text-amber-700 hover:bg-amber-50"
-            >
+            <Button variant="outline" onClick={() => handleImport(true)} disabled={saving}
+              className="border-amber-300 text-amber-700 hover:bg-amber-50">
               Import All ({validCount + issueCount})
             </Button>
           )}
-          <Button
-            onClick={() => handleImport(false)}
-            disabled={saving || validCount === 0}
-            className="bg-primary hover:bg-primary/90 gap-2"
-          >
+          <Button onClick={() => handleImport(false)} disabled={saving || validCount === 0}
+            className="bg-primary hover:bg-primary/90 gap-2">
             {saving
               ? <><Loader2 className="w-4 h-4 animate-spin" /> Importing...</>
               : <><CheckCircle className="w-4 h-4" /> Import {validCount} Valid</>
@@ -350,7 +389,6 @@ export default function CandidateCsvPreview() {
         </div>
       </div>
 
-      {/* ── Tabs ─────────────────────────────────────────────────────────────── */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col" style={{height: "calc(100vh - 16rem)"}}>
         <TabsList className="shrink-0 self-start mb-4">
           <TabsTrigger value="valid" className="gap-1.5">
@@ -371,7 +409,6 @@ export default function CandidateCsvPreview() {
           </TabsTrigger>
         </TabsList>
 
-        {/* ── Valid tab ──────────────────────────────────────────────────────── */}
         <TabsContent value="valid" className="flex gap-5 mt-0 overflow-hidden" style={{height: "calc(100% - 2.5rem)"}}>
           {validCandidates.length === 0 ? (
             <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
@@ -379,24 +416,17 @@ export default function CandidateCsvPreview() {
             </div>
           ) : (
             <>
-              <CandidateSidebar
-                candidates={validCandidates}
-                selected={selectedValid}
-                onSelect={i => setSelectedValid(i)}
-                onRemove={i => removeCandidate(i, false)}
-              />
+              <CandidateSidebar candidates={validCandidates} selected={selectedValid}
+                onSelect={i => setSelectedValid(i)} onRemove={i => removeCandidate(i, false)} />
               {currentValid && (
-                <CandidateEditor
-                  candidate={currentValid}
+                <CandidateEditor candidate={currentValid}
                   onChange={c => updateCandidate(c, selectedValid, validCandidates, false)}
-                  onRemove={() => removeCandidate(selectedValid, false)}
-                />
+                  onRemove={() => removeCandidate(selectedValid, false)} />
               )}
             </>
           )}
         </TabsContent>
 
-        {/* ── Needs Review tab ───────────────────────────────────────────────── */}
         <TabsContent value="issues" className="flex gap-5 mt-0 overflow-hidden" style={{height: "calc(100% - 2.5rem)"}}>
           {issueCandidates.length === 0 ? (
             <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
@@ -404,38 +434,27 @@ export default function CandidateCsvPreview() {
             </div>
           ) : (
             <>
-              <CandidateSidebar
-                candidates={issueCandidates}
-                selected={selectedIssue}
-                onSelect={i => setSelectedIssue(i)}
-                onRemove={i => removeCandidate(i, true)}
-                showWarnings
-              />
+              <CandidateSidebar candidates={issueCandidates} selected={selectedIssue}
+                onSelect={i => setSelectedIssue(i)} onRemove={i => removeCandidate(i, true)} showWarnings />
               {currentIssue && (
                 <div className="flex flex-col flex-1 gap-3 min-h-0">
-                  {/* Issue summary banner */}
                   <div className="shrink-0 flex items-start gap-3 px-4 py-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-800">
                     <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                     <div className="text-xs">
                       <p className="font-semibold mb-0.5">This resume is missing required fields</p>
-                      <p>
-                        <span className="font-medium">Required: </span>
-                        {currentIssue._missingFields?.join(", ") || "—"}
-                      </p>
+                      <p><span className="font-medium">Required: </span>{currentIssue._missingFields?.join(", ") || "—"}</p>
                       {currentIssue._missingRecommended?.length > 0 && (
                         <p className="mt-0.5 text-amber-600">
                           <span className="font-medium">Also recommended: </span>
                           {currentIssue._missingRecommended.join(", ")}
                         </p>
                       )}
-                      <p className="mt-1 text-amber-600">Fill in the fields below to move this candidate to the Valid tab, or remove them from the import.</p>
+                      <p className="mt-1 text-amber-600">Fill in the fields below or remove this candidate from the import.</p>
                     </div>
                   </div>
-                  <CandidateEditor
-                    candidate={currentIssue}
+                  <CandidateEditor candidate={currentIssue}
                     onChange={c => updateCandidate(c, selectedIssue, issueCandidates, true)}
-                    onRemove={() => removeCandidate(selectedIssue, true)}
-                  />
+                    onRemove={() => removeCandidate(selectedIssue, true)} />
                 </div>
               )}
             </>

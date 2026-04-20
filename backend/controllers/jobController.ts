@@ -32,7 +32,11 @@ export const getJobs = async (req: AuthRequest, res: Response) => {
 // GET /api/jobs/:id
 export const getJobById = async (req: AuthRequest, res: Response) => {
   try {
-    const job = await Job.findOne({ _id: req.params.id, userId: req.user!.id });
+    const { id } = req.params;
+    if (!id || id === "undefined" || !require("mongoose").Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid job ID" });
+    }
+    const job = await Job.findOne({ _id: id, userId: req.user!.id });
     if (!job) return res.status(404).json({ message: "Job not found" });
     res.json(job);
   } catch (error) {
@@ -62,10 +66,8 @@ export const deleteJob = async (req: AuthRequest, res: Response) => {
   try {
     const job = await Job.findOneAndDelete({ _id: req.params.id, userId: req.user!.id });
     if (!job) return res.status(404).json({ message: "Job not found" });
-    const id = req.params.id;
-    if (!id) return res.status(400).json({ message: "Missing id" });
-    await ScreeningResult.deleteMany({ job_id: id });
-    await Applicant.deleteMany({ jobId: id });
+    await ScreeningResult.deleteMany({ job_id: req.params.id });
+    await Applicant.deleteMany({ jobId: req.params.id });
     res.json({ message: "Job deleted successfully" });
   } catch (error) {
     console.error(error);

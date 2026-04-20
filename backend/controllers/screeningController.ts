@@ -9,6 +9,7 @@ interface AuthRequest extends Request {
   user?: { id: string };
 }
 
+
 // Normalize gaps — AI may return strings or {description, type} objects
 function normalizeGaps(gaps: any[]): { description: string; type: string }[] {
   if (!Array.isArray(gaps)) return [];
@@ -45,10 +46,13 @@ export const runScreening = async (req: AuthRequest, res: Response) => {
     const effectiveWeights = weights || job.screening_weights || { skills: 25, experience: 25, education: 25, relevance: 25 };
     const effectiveShortlistSize = shortlistSize ? Number(shortlistSize) : applicants.length;
 
+    // Run AI screening
     const aiResults = await screenAI(job, applicants, effectiveWeights, effectiveShortlistSize);
 
+    // Delete prior results for this job
     await ScreeningResult.deleteMany({ job_id: new mongoose.Types.ObjectId(job_id) });
 
+    // Save one document per candidate
     const savedResults = await ScreeningResult.insertMany(
       aiResults.map((r: any, idx: number) => ({
         job_id: new mongoose.Types.ObjectId(job_id),
@@ -70,6 +74,7 @@ export const runScreening = async (req: AuthRequest, res: Response) => {
 
     await Job.findByIdAndUpdate(job_id, { last_screened_at: new Date() });
 
+    // Return plain array — matches what the frontend slice expects
     res.json(savedResults);
   } catch (error) {
     console.error("Screening error:", error);
@@ -80,25 +85,18 @@ export const runScreening = async (req: AuthRequest, res: Response) => {
 // GET /api/results
 export const getResults = async (req: AuthRequest, res: Response) => {
   try {
-    const userId = req.user!.id;
+    const filter: any = {};
+    const jobIdParam  = req.query.job_id as string;
+    const appIdParam  = req.query.applicant_id as string;
 
-    // Always scope results to the current user's jobs
-    const userJobs = await Job.find({ userId }).select("_id");
-    const userJobIds = userJobs.map(j => j._id);
-
-    const filter: any = { job_id: { $in: userJobIds } };
-
-    // Optional narrowing by job or applicant
-    if (req.query.job_id) {
-      const jobId = new mongoose.Types.ObjectId(req.query.job_id as string);
-      // Make sure this job actually belongs to the user before filtering
-      const jobBelongsToUser = userJobIds.some(id => id.equals(jobId));
-      if (!jobBelongsToUser) return res.json([]);
-      filter.job_id = jobId;
+    if (jobIdParam && jobIdParam !== "undefined" && mongoose.Types.ObjectId.isValid(jobIdParam)) {
+      filter.job_id = new mongoose.Types.ObjectId(jobIdParam);
+      // Only return results for jobs owned by this user
+      const job = await Job.findOne({ _id: jobIdParam, userId: req.user!.id });
+      if (!job) return res.json([]);
     }
-
-    if (req.query.applicant_id) {
-      filter.applicant_id = new mongoose.Types.ObjectId(req.query.applicant_id as string);
+    if (appIdParam && appIdParam !== "undefined" && mongoose.Types.ObjectId.isValid(appIdParam)) {
+      filter.applicant_id = new mongoose.Types.ObjectId(appIdParam);
     }
 
     const results = await ScreeningResult.find(filter).sort({ rank: 1 });
@@ -127,7 +125,7 @@ export const deleteResultsByJob = async (req: AuthRequest, res: Response) => {
 // DELETE /api/results/by-applicant/:id
 export const deleteResultsByApplicant = async (req: AuthRequest, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id;
     if (!id || Array.isArray(id)) return res.status(400).json({ message: "Invalid id" });
     const { deletedCount } = await ScreeningResult.deleteMany({ applicant_id: new mongoose.Types.ObjectId(id) });
     res.json({ message: `${deletedCount} results deleted` });

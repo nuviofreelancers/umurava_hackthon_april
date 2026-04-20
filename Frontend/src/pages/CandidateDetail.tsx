@@ -84,7 +84,17 @@ export default function CandidateDetail() {
   const loadCandidate = useCallback(() => {
     setLoading(true);
     applicantsApi.get(id)
-      .then(data => setForm(data))
+      .then(data => {
+        // FIX: split full_name into first_name + last_name so the edit fields
+        // are populated on load. The DB only stores full_name, not split fields.
+        const d = data as any;
+        if (d && !d.first_name && !d.last_name && d.full_name) {
+          const parts = d.full_name.trim().split(" ");
+          d.first_name = parts[0] || "";
+          d.last_name  = parts.slice(1).join(" ") || "";
+        }
+        setForm(d);
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [id]);
@@ -161,9 +171,9 @@ export default function CandidateDetail() {
         full_name: fullName,
         profile_completeness: Math.round((filled.length / coreFields.length) * 100),
       });
-      toast({ title: "Candidate updated" });
+      toast({ title: "Candidate updated", duration: 2000 });
     } catch {
-      toast({ title: "Failed to save", variant: "destructive" });
+      toast({ title: "Failed to save", variant: "destructive", duration: 3000 });
     }
     setSaving(false);
   };

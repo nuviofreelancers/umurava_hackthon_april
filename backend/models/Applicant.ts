@@ -15,7 +15,7 @@ const applicantSchema = new mongoose.Schema({
   location: { type: String, default: "" },
 
   // Education
-  education_level: { type: String, enum: ["High School", "Associate", "Bachelor", "Master", "PhD", "Other", ""], default: "" },
+  education_level: { type: String, enum: ["None", "High School", "Associate", "Bachelor", "Master", "PhD", "Other", ""], default: "" },
   education_field: { type: String, default: "" },
 
   // Skills & links
@@ -56,7 +56,7 @@ const applicantSchema = new mongoose.Schema({
   // System fields
   jobId: { type: mongoose.Schema.Types.ObjectId, ref: "Job" },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
-  sourceType: { type: String, enum: ["manual", "pdf", "csv", "json"], default: "manual" },
+  sourceType: { type: String, enum: ["manual", "pdf", "csv", "json", "docx", "image_ocr", "url"], default: "manual" },
   rawText: { type: String, select: false } // don't return by default — avoids bloat
 }, { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } });
 

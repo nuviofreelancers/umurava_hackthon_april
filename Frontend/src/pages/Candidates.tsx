@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { fetchApplicants, deleteApplicant } from "@/store/applicantsSlice";
 import { fetchJobs } from "@/store/jobSlice";
@@ -19,14 +19,18 @@ const skillName = (s) => typeof s === "string" ? s : (s?.name ?? "");
 
 export default function Candidates() {
   const dispatch   = useDispatch();
+  const navigate   = useNavigate();
   const applicants = useSelector(s => s.applicants.list);
   const jobs       = useSelector(s => s.jobs.list);
   const results    = useSelector(s => s.results.list);
   const loading    = useSelector(s => s.applicants.loading);
+  const hasMore    = useSelector(s => (s.applicants as any).hasMore);
+  const page       = useSelector(s => (s.applicants as any).page);
 
   const [search, setSearch]               = useState("");
   const [scheduling, setScheduling]       = useState(null);
   const [addingCandidate, setAddingCandidate] = useState(false);
+  const [loadingMore, setLoadingMore]     = useState(false);
   const { toast } = useToast();
   const undoRef = useRef(null);
 
@@ -38,22 +42,37 @@ export default function Candidates() {
 
   useEffect(() => { loadAll(); }, [dispatch]);
 
+  // FIX: load next page and append to the list
+  const handleLoadMore = async () => {
+    setLoadingMore(true);
+    await dispatch(fetchApplicants({ page: page + 1 }) as any);
+    setLoadingMore(false);
+  };
+
   const filtered = applicants.filter(a => {
     if (!search) return true;
     const q = search.toLowerCase();
     return (
       a.full_name?.toLowerCase().includes(q) ||
-      // Handle both string[] and {name,level,yearsOfExperience}[] skills
       (a.skills || []).some(s => skillName(s).toLowerCase().includes(q))
     );
   });
 
+  // FIX: check both .id and ._id on job objects since Mongoose virtuals
+  // may or may not be serialised by Redux depending on the response shape
   const getJobTitle = (jobId) => {
-    if (!jobId) return "Unknown";
+    if (!jobId) return null;
     const jobIdStr = String(jobId);
-    return jobs.find(j => String(j.id) === jobIdStr || String((j as any)._id) === jobIdStr)?.title || "Unknown";
+    const found = jobs.find(j =>
+      String(j.id) === jobIdStr ||
+      String((j as any)._id) === jobIdStr
+    );
+    return found?.title || null;
   };
-  const getResult   = (applicantId) => results.find(r => r.applicant_id === applicantId);
+
+  const getResult = (applicantId) => results.find(r =>
+    String((r as any).applicant_id) === String(applicantId)
+  );
 
   const exportCSV = () => {
     const headers = ["Name","Email","Phone","Location","Current Role","Company","Experience (yrs)","Education","Skills","Source","Interview Status"];
@@ -94,12 +113,15 @@ export default function Candidates() {
     doc.save("candidates.pdf");
   };
 
-  const handleDelete = (a) => {
+  const handleDelete = (e, a) => {
+    e.preventDefault(); // don't navigate when clicking delete on a card
+    e.stopPropagation();
     dispatch(deleteApplicant(a.id));
     let undone = false;
     const { dismiss } = toast({
       title: `${a.full_name} deleted`,
       description: "Undo within 5 seconds.",
+      duration: 5000,
       action: (
         <button
           onClick={() => { undone = true; clearTimeout(undoRef.current); dispatch(fetchApplicants()); dismiss(); }}
@@ -151,12 +173,21 @@ export default function Candidates() {
       {filtered.length === 0 ? (
         <EmptyState icon={User} title="No candidates found" description="Add candidates by going to a job posting" />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filtered.map(a => {
-            const result = getResult(a.id);
-            const skills = (a.skills || []).map(skillName);
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {filtered.map(a => {
+            const result   = getResult(a.id);
+            const skills   = (a.skills || []).map(skillName);
+            const jobTitle = getJobTitle((a as any).jobId || (a as any).job_id);
+            const jobId    = (a as any).jobId || (a as any).job_id;
+
             return (
-              <div key={a.id} className="bg-card rounded-xl border border-border p-5 hover:shadow-md transition-all group">
+              // FIX: entire card is now wrapped in a Link so clicking anywhere navigates to profile
+              <Link
+                key={a.id}
+                to={`/candidates/${a.id}`}
+                className="block bg-card rounded-xl border border-border p-5 hover:shadow-md transition-all group"
+              >
                 <div className="flex items-start gap-3">
                   <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                     <User className="w-5 h-5 text-primary" />
@@ -172,17 +203,23 @@ export default function Candidates() {
                   <div className="flex items-center gap-2 shrink-0">
                     {result && (
                       <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold border ${
-                        result.match_score >= 80 ? "text-accent bg-accent/10 border-accent/20" :
-                        result.match_score >= 60 ? "text-primary bg-primary/10 border-primary/20" :
+                        (result as any).match_score >= 80 ? "text-accent bg-accent/10 border-accent/20" :
+                        (result as any).match_score >= 60 ? "text-primary bg-primary/10 border-primary/20" :
                         "text-warning bg-warning/10 border-warning/20"
-                      }`}>{result.match_score}</div>
+                      }`}>{(result as any).match_score}</div>
                     )}
-                    <button onClick={() => setScheduling(a)} title="Schedule Interview"
-                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10">
+                    {/* FIX: e.preventDefault + e.stopPropagation so card link doesn't fire */}
+                    <button
+                      onClick={e => { e.preventDefault(); e.stopPropagation(); setScheduling(a); }}
+                      title="Schedule Interview"
+                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10"
+                    >
                       <CalendarPlus className="w-4 h-4" />
                     </button>
-                    <button onClick={() => handleDelete(a)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10">
+                    <button
+                      onClick={e => handleDelete(e, a)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                    >
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
@@ -199,22 +236,49 @@ export default function Candidates() {
                     {skills.length > 4 && <span className="text-[10px] text-muted-foreground">+{skills.length - 4}</span>}
                   </div>
                   <div className="pt-2 border-t border-border flex items-center justify-between">
-                    <span className="text-[10px] text-muted-foreground px-1.5 py-0.5 bg-muted rounded">{a.source}</span>
-                    <Link to={`/jobs/${a.job_id}`} className="text-[10px] text-primary hover:underline">
-                      {getJobTitle(a.job_id)} →
-                    </Link>
+                    <span className="text-[10px] text-muted-foreground px-1.5 py-0.5 bg-muted rounded">
+                      {(a as any).sourceType || (a as any).source || "manual"}
+                    </span>
+                    {/* FIX: only show job link if we can resolve the title */}
+                    {jobTitle && jobId ? (
+                      <button
+                        onClick={e => { e.preventDefault(); e.stopPropagation(); navigate(`/jobs/${jobId}`); }}
+                        className="text-[10px] text-primary hover:underline"
+                      >
+                        {jobTitle} →
+                      </button>
+                    ) : (
+                      <span className="text-[10px] text-muted-foreground">No job assigned</span>
+                    )}
                   </div>
                 </div>
-              </div>
+              </Link>
             );
           })}
-        </div>
+          </div>
+          {/* FIX: Load More button — only shown when search is empty and more pages exist */}
+          {!search && hasMore && (
+            <div className="flex justify-center pt-2">
+              <Button
+                variant="outline"
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+                className="gap-2 min-w-[140px]"
+              >
+                {loadingMore
+                  ? <><div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" /> Loading...</>
+                  : `Load more`
+                }
+              </Button>
+            </div>
+          )}
+        </>
       )}
 
       {scheduling && (
         <ScheduleInterviewModal
           applicant={scheduling}
-          jobTitle={getJobTitle(scheduling.job_id)}
+          jobTitle={getJobTitle((scheduling as any).jobId || (scheduling as any).job_id) || ""}
           onClose={() => setScheduling(null)}
           onScheduled={() => { setScheduling(null); loadAll(); }}
         />

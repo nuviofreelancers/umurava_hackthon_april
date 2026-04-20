@@ -56,7 +56,15 @@ export const getMe = async (req: AuthRequest, res: Response) => {
   try {
     const user = await User.findById(req.user.id).select("-password");
     if (!user) return res.status(404).json({ message: "User not found" });
-    res.json({ id: user.id, email: user.email, full_name: user.full_name, role: user.role });
+    res.json({
+      id:             user.id,
+      email:          user.email,
+      full_name:      user.full_name,
+      role:           user.role,
+      phone_number:   (user as any).phone_number   || "",
+      specialisation: (user as any).specialisation || "",
+      bio:            (user as any).bio            || "",
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Error fetching profile" });
@@ -66,15 +74,29 @@ export const getMe = async (req: AuthRequest, res: Response) => {
 // PUT /api/auth/me
 export const updateMe = async (req: AuthRequest, res: Response) => {
   try {
-    const { full_name, email, password } = req.body;
+    const { full_name, email, password, phone_number, specialisation, bio } = req.body;
     const updates: any = {};
-    if (full_name) updates.full_name = full_name;
-    if (email) updates.email = email;
-    if (password) updates.password = await bcrypt.hash(password, 10);
+    if (full_name      !== undefined) updates.full_name      = full_name;
+    if (email          !== undefined) updates.email          = email;
+    if (phone_number   !== undefined) updates.phone_number   = phone_number;
+    if (specialisation !== undefined) updates.specialisation = specialisation;
+    if (bio            !== undefined) updates.bio            = bio;
+    if (password)                     updates.password       = await bcrypt.hash(password, 10);
 
     const user = await User.findByIdAndUpdate(req.user.id, updates, { new: true }).select("-password");
     if (!user) return res.status(404).json({ message: "User not found" });
-    res.json({ message: "Profile updated", user });
+    res.json({
+      message: "Profile updated",
+      user: {
+        id:             user.id,
+        email:          user.email,
+        full_name:      user.full_name,
+        role:           user.role,
+        phone_number:   (user as any).phone_number   || "",
+        specialisation: (user as any).specialisation || "",
+        bio:            (user as any).bio            || "",
+      }
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Error updating profile" });

@@ -44,7 +44,11 @@ ${text}`;
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
     { contents: [{ parts: [{ text: prompt }] }] },
     { timeout: 30000 }
-  );
+  ).catch((err) => {
+    const geminiError = err.response?.data?.error;
+    console.error("Gemini API error (extractCV):", geminiError || err.message);
+    throw new Error(geminiError?.message || "Gemini API call failed");
+  });
 
   let output = res.data.candidates[0].content.parts[0].text;
   output = output.replace(/```json/g, "").replace(/```/g, "").trim();
@@ -130,7 +134,11 @@ Return ONLY valid JSON. No markdown, no preamble.
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
     { contents: [{ parts: [{ text: prompt }] }] },
     { timeout: 60000 }
-  );
+  ).catch((err) => {
+    const geminiError = err.response?.data?.error;
+    console.error("Gemini API error (screenAI):", geminiError || err.message);
+    throw new Error(geminiError?.message || "Gemini API call failed");
+  });
 
   let output = res.data.candidates[0].content.parts[0].text;
   output = output.replace(/```json/g, "").replace(/```/g, "").trim();

@@ -133,7 +133,14 @@ export default function CandidateCompare() {
                   <ul className="space-y-1">
                     {(r.gaps || []).slice(0, 3).map((g, i) => (
                       <li key={i} className="flex items-start gap-1.5">
-                        <span className="w-1 h-1 rounded-full bg-destructive mt-1.5 shrink-0" />{g}
+                        <span className="w-1 h-1 rounded-full bg-destructive mt-1.5 shrink-0" />
+                        {/* FIX: gaps are objects {description, type} — was rendering the object directly */}
+                        <span>
+                          {typeof g === "string" ? g : g?.description || ""}
+                          {typeof g === "object" && g?.type && (
+                            <span className="ml-1 text-muted-foreground">({g.type})</span>
+                          )}
+                        </span>
                       </li>
                     ))}
                   </ul>

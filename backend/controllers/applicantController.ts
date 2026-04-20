@@ -28,29 +28,86 @@ export const bulkCreateApplicants = async (req: AuthRequest, res: Response) => {
     if (!Array.isArray(applicants) || applicants.length === 0) {
       return res.status(400).json({ message: "applicants must be a non-empty array" });
     }
+
+    // ── Duplicate detection ────────────────────────────────────────────────
+    // Check each incoming candidate: does this email already exist for this user?
+    // If job_id is provided, also check if they already applied to THIS specific job.
+    const duplicateWarnings: string[] = [];
+    const crossJobMatches: string[] = [];
+
+    const incomingEmails = applicants
+      .map((a: any) => a.email?.trim().toLowerCase())
+      .filter(Boolean);
+
+    if (incomingEmails.length > 0) {
+      // Find any existing applicants for this user with matching emails
+      const existing = await Applicant.find({
+        userId: req.user!.id,
+        email: { $in: incomingEmails },
+      }).select("email jobId full_name");
+
+      for (const ex of existing) {
+        const exEmail = (ex as any).email?.toLowerCase();
+        const exJobId = (ex as any).jobId?.toString();
+        const exName  = (ex as any).full_name || exEmail;
+
+        if (job_id && exJobId === job_id.toString()) {
+          // Same candidate, same job
+          duplicateWarnings.push(exName);
+        } else {
+          // Same candidate, different job
+          crossJobMatches.push(exName);
+        }
+      }
+    }
+
     const docs = applicants.map((a: any) => ({
       ...a,
       userId: req.user!.id,
       jobId: job_id ? new mongoose.Types.ObjectId(job_id) : undefined,
       sourceType: sourceType || a.sourceType || "manual",
     }));
+
     const inserted = await Applicant.insertMany(docs, { ordered: false });
-    res.status(201).json(inserted);
+
+    res.status(201).json({
+      inserted,
+      duplicateWarnings,   // candidates already in this job
+      crossJobMatches,     // candidates who applied to another job before
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Error bulk importing applicants" });
   }
 };
 
-// GET /api/applicants
+// GET /api/applicants — supports ?page=&limit= for pagination
 export const getApplicants = async (req: AuthRequest, res: Response) => {
   try {
     const filter: any = { userId: req.user!.id };
-    if (req.query.job_id) {
-      filter.jobId = new mongoose.Types.ObjectId(req.query.job_id as string);
+    const jobIdParam = req.query.job_id as string;
+    if (jobIdParam && jobIdParam !== "undefined" && mongoose.Types.ObjectId.isValid(jobIdParam)) {
+      filter.jobId = new mongoose.Types.ObjectId(jobIdParam);
     }
-    const applicants = await Applicant.find(filter).sort({ createdAt: -1 });
-    res.json(applicants);
+
+    // FIX: pagination — defaults to page 1, 50 per page
+    const page  = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit as string) || 50));
+    const skip  = (page - 1) * limit;
+
+    const [applicants, total] = await Promise.all([
+      Applicant.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
+      Applicant.countDocuments(filter),
+    ]);
+
+    res.json({
+      data: applicants,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      hasMore: page * limit < total,
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Error fetching applicants" });
@@ -90,9 +147,7 @@ export const deleteApplicant = async (req: AuthRequest, res: Response) => {
   try {
     const applicant = await Applicant.findOneAndDelete({ _id: req.params.id, userId: req.user!.id });
     if (!applicant) return res.status(404).json({ message: "Applicant not found" });
-    const id = req.params.id;
-    if (!id) return res.status(400).json({ message: "Missing id" });
-    await ScreeningResult.deleteMany({ applicant_id: id });
+    await ScreeningResult.deleteMany({ applicant_id: req.params.id });
     res.json({ message: "Applicant deleted successfully" });
   } catch (error) {
     console.error(error);
@@ -282,7 +337,7 @@ function normalizeCandidate(c: any): any {
   if (!education_level && Array.isArray(c.education) && c.education.length > 0) {
     const latest = c.education[c.education.length - 1];
     education_level = latest.degree || "";
-    education_field = latest["Field of Study"] || latest.field || "";
+    education_field = latest.fieldOfStudy || latest["Field of Study"] || latest.field || "";
   }
 
   // experience_years: calculate from experience array if not provided
@@ -303,21 +358,27 @@ function normalizeCandidate(c: any): any {
     experience_years = Math.round(totalMonths / 12);
   }
 
-  // Skills: already in correct format {name, level, yearsOfExperience}
-  const skills = (c.skills || []).map((s: any) =>
+  // Skills: handle string (CSV cell), array of strings, or array of objects
+  const rawSkills = c.skills;
+  const skillsArray: any[] = Array.isArray(rawSkills)
+    ? rawSkills
+    : typeof rawSkills === "string" && rawSkills.trim()
+      ? rawSkills.split(/[;|,]/).map((s: string) => s.trim()).filter(Boolean)
+      : [];
+  const skills = skillsArray.map((s: any) =>
     typeof s === "string" ? { name: s, level: "Intermediate", yearsOfExperience: 0 } : s
   );
 
   // Education array: normalise field names
-  const education = (c.education || []).map((e: any) => ({
+  const education = (Array.isArray(c.education) ? c.education : []).map((e: any) => ({
     institution: e.institution || "",
     degree: e.degree || "",
-    field: e["Field of Study"] || e.field || "",
-    year: String(e["End Year"] || e.year || ""),
+    field: e.fieldOfStudy || e["Field of Study"] || e.field || "",
+    year: String(e.endYear || e["End Year"] || e.year || ""),
   }));
 
   // Experience array: normalise field names
-  const experience = (c.experience || []).map((e: any) => ({
+  const experience = (Array.isArray(c.experience) ? c.experience : []).map((e: any) => ({
     company: e.company || "",
     role: e.role || "",
     startDate: e["Start Date"] || e.startDate || "",
@@ -325,10 +386,10 @@ function normalizeCandidate(c: any): any {
   }));
 
   // Certifications: normalise Issue Date → year
-  const certifications = (c.certifications || []).map((cert: any) => ({
+  const certifications = (Array.isArray(c.certifications) ? c.certifications : []).map((cert: any) => ({
     name: cert.name || "",
     issuer: cert.issuer || "",
-    year: cert["Issue Date"] || cert.year || "",
+    year: cert.issueDate || cert["Issue Date"] || cert.year || "",
   }));
 
   // Social links: Umurava uses portfolio, we use website
@@ -360,12 +421,24 @@ function normalizeCandidate(c: any): any {
     education,
     experience,
     certifications,
-    languages: c.languages || [],
-    projects: c.projects || [],
+    languages: Array.isArray(c.languages) ? c.languages : [],
+    projects: Array.isArray(c.projects) ? c.projects : [],
     socialLinks,
     portfolio_url,
     availability,
   };
+}
+
+// ── Helper: check if an email already exists in the system for this user ──────
+async function checkDuplicateEmail(email: string, jobId: string | undefined, userId: string | undefined) {
+  if (!email || !userId) return {};
+  const existing = await Applicant.findOne({ userId, email: email.trim().toLowerCase() }).select("jobId full_name");
+  if (!existing) return {};
+  const existingJobId = (existing as any).jobId?.toString();
+  if (jobId && existingJobId === jobId.toString()) {
+    return { duplicateWarnings: [(existing as any).full_name || email] };
+  }
+  return { crossJobMatches: [(existing as any).full_name || email] };
 }
 
 // POST /api/upload/candidates  — parse structured CSV/JSON or extract CV from file/URL
@@ -381,8 +454,12 @@ export const parseUploadedCandidates = async (req: Request, res: Response) => {
         return res.status(422).json({ message: "The URL does not appear to contain a resume or CV." });
       }
       const validated = validateResume(structured);
+
+      // FIX: check for duplicate by email before returning
+      const duplicateWarning = await checkDuplicateEmail(validated.email, job_id, (req as any).user?.id);
+
       const candidate = { ...validated, sourceType: "url", cv_url, ...(job_id ? { jobId: job_id } : {}) };
-      return res.json({ count: 1, candidates: [candidate], sourceType: "url" });
+      return res.json({ count: 1, candidates: [candidate], sourceType: "url", ...duplicateWarning });
     }
 
     if (!req.file) return res.status(400).json({ message: "No file or URL provided" });
@@ -395,18 +472,51 @@ export const parseUploadedCandidates = async (req: Request, res: Response) => {
       const text = buffer.toString("utf-8");
       const lines = text.split("\n").filter(l => l.trim());
       if (lines.length < 2) return res.status(400).json({ message: "CSV appears empty or has no data rows" });
-      const firstLine = lines[0];
-      if (!firstLine) return res.status(400).json({ message: "Empty CSV" });
-      const headers = firstLine.split(",").map(h => h.trim().replace(/"/g, ""));
-      const candidates = lines.slice(1).map(line => {
-        const values = line.split(",").map(v => v.trim().replace(/"/g, ""));
-        const obj: any = {};
-        headers.forEach((h, i) => { obj[h] = values[i] || ""; });
-        if (job_id) obj.jobId = job_id;
-        obj.sourceType = "csv";
-        return { ...normalizeCandidate(obj), sourceType: "csv", ...(job_id ? { jobId: job_id } : {}) };
-      });
-      return res.json({ count: candidates.length, candidates, sourceType: "csv" });
+
+      // Proper CSV parser — respects quoted fields that contain commas
+      // e.g. "React, Node.js, PostgreSQL" stays as one value
+      const parseCSVLine = (line: string): string[] => {
+        const result: string[] = [];
+        let current = "";
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (ch === '"' && !inQuotes) {
+            inQuotes = true;
+          } else if (ch === '"' && inQuotes && line[i + 1] === '"') {
+            current += '"'; i++; // escaped quote inside quoted field
+          } else if (ch === '"' && inQuotes) {
+            inQuotes = false;
+          } else if (ch === "," && !inQuotes) {
+            result.push(current.trim());
+            current = "";
+          } else {
+            current += ch;
+          }
+        }
+        result.push(current.trim());
+        return result;
+      };
+
+      const headers = parseCSVLine(lines[0]).map(h => h.replace(/"/g, ""));
+      const candidates: any[] = [];
+      const parseErrors: string[] = [];
+      for (const line of lines.slice(1)) {
+        try {
+          const values = parseCSVLine(line);
+          const obj: any = {};
+          headers.forEach((h: string, i: number) => { obj[h] = values[i] || ""; });
+          if (job_id) obj.jobId = job_id;
+          obj.sourceType = "csv";
+          candidates.push({ ...normalizeCandidate(obj), sourceType: "csv", ...(job_id ? { jobId: job_id } : {}) });
+        } catch (rowErr: any) {
+          parseErrors.push(`Row skipped — ${rowErr.message}`);
+        }
+      }
+      if (candidates.length === 0) {
+        return res.status(422).json({ message: "No valid candidates could be parsed from the CSV.", errors: parseErrors });
+      }
+      return res.json({ count: candidates.length, candidates, sourceType: "csv", ...(parseErrors.length ? { parseErrors } : {}) });
     }
 
     // ── Structured bulk: JSON ──────────────────────────────────────────────────
@@ -431,9 +541,13 @@ export const parseUploadedCandidates = async (req: Request, res: Response) => {
     }
 
     const validated = validateResume(structured);
+
+    // FIX: check for duplicate by email before returning
+    const duplicateWarning = await checkDuplicateEmail(validated.email, job_id, (req as any).user?.id);
+
     const sourceType = ext === ".pdf" ? "pdf" : [".docx", ".doc"].includes(ext) ? "docx" : "image_ocr";
     const candidate = { ...validated, sourceType, ...(job_id ? { jobId: job_id } : {}) };
-    return res.json({ count: 1, candidates: [candidate], sourceType });
+    return res.json({ count: 1, candidates: [candidate], sourceType, ...duplicateWarning });
 
   } catch (error: any) {
     console.error(error);
@@ -453,11 +567,35 @@ export const parseUploadedJobs = async (req: Request, res: Response) => {
       const text = buffer.toString("utf-8");
       const lines = text.split("\n").filter(l => l.trim());
       if (lines.length < 2) return res.status(400).json({ message: "CSV appears empty or has no data rows" });
-      const firstLine = lines[0];
-      if (!firstLine) return res.status(400).json({ message: "Empty CSV" });
-      const headers = firstLine.split(",").map(h => h.trim().replace(/"/g, ""));
+
+      // FIX: use proper quoted-CSV parser — handles commas inside quoted fields
+      // (e.g. job descriptions like "Build, test, and deploy" stay as one value)
+      const parseCSVLine = (line: string): string[] => {
+        const result: string[] = [];
+        let current = "";
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (ch === '"' && !inQuotes) {
+            inQuotes = true;
+          } else if (ch === '"' && inQuotes && line[i + 1] === '"') {
+            current += '"'; i++;
+          } else if (ch === '"' && inQuotes) {
+            inQuotes = false;
+          } else if (ch === "," && !inQuotes) {
+            result.push(current.trim());
+            current = "";
+          } else {
+            current += ch;
+          }
+        }
+        result.push(current.trim());
+        return result;
+      };
+
+      const headers = parseCSVLine(lines[0]).map(h => h.replace(/"/g, ""));
       const jobs = lines.slice(1).map(line => {
-        const values = line.split(",").map(v => v.trim().replace(/"/g, ""));
+        const values = parseCSVLine(line);
         const obj: any = {};
         headers.forEach((h, i) => { obj[h] = values[i] || ""; });
         return obj;

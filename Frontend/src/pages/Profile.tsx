@@ -1,47 +1,54 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/use-toast";
-import { useDispatch, useSelector } from "react-redux";
+import { useAuth } from "@/lib/AuthContext";
 import { auth } from "@/api/backend";
-import { loadCurrentUser } from "@/store/authSlice";
 
 export default function Profile() {
-  const dispatch = useDispatch();
-  const user = useSelector(state => state.auth.user);
+  const navigate = useNavigate();
+  const { user, refreshUser } = useAuth();
+  const { toast } = useToast();
+
   const [form, setForm] = useState({
-    full_name: user?.full_name || "",
-    phone_number: user?.phone_number || "",
-    specialisation: user?.specialisation || "",
-    bio: user?.bio || "",
+    full_name:      user?.full_name      || "",
+    phone_number:   (user as any)?.phone_number   || "",
+    specialisation: (user as any)?.specialisation || "",
+    bio:            (user as any)?.bio            || "",
   });
   const [saving, setSaving] = useState(false);
-  const { toast } = useToast();
 
   const handleSave = async () => {
     setSaving(true);
     try {
       await auth.updateMe(form);
-      await dispatch(loadCurrentUser());
-      toast({ title: "Profile updated successfully" });
+      // FIX: refresh AuthContext user so the avatar/name in the header updates immediately
+      await refreshUser();
+      toast({ title: "Profile updated successfully", duration: 2000 });
     } catch {
-      toast({ title: "Failed to update profile", variant: "destructive" });
+      toast({ title: "Failed to update profile", variant: "destructive", duration: 3000 });
     }
     setSaving(false);
   };
 
+  // FIX: Cancel resets the form AND navigates back to the jobs page (home)
   const handleCancel = () => {
     setForm({
-      full_name: user?.full_name || "",
-      phone_number: user?.phone_number || "",
-      specialisation: user?.specialisation || "",
-      bio: user?.bio || "",
+      full_name:      user?.full_name      || "",
+      phone_number:   (user as any)?.phone_number   || "",
+      specialisation: (user as any)?.specialisation || "",
+      bio:            (user as any)?.bio            || "",
     });
+    navigate("/jobs");
   };
 
-  const initials = user?.full_name
-    ? user.full_name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)
-    : "?";
+  // Derive initials from the live form value so the avatar previews edits in real-time
+  const initials = form.full_name
+    ? form.full_name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)
+    : (user?.full_name
+        ? user.full_name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
+        : "?");
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -55,7 +62,7 @@ export default function Profile() {
         <div className="lg:col-span-2 bg-card border border-border rounded-xl p-6 space-y-5">
           <h2 className="font-heading font-semibold text-lg">My Profile</h2>
 
-          {/* Avatar */}
+          {/* Avatar — FIX: updates live as you type your name */}
           <div className="flex justify-center">
             <div className="w-20 h-20 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-2xl font-bold">
               {initials}
