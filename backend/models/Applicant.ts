@@ -57,10 +57,17 @@ const applicantSchema = new mongoose.Schema({
   jobId: { type: mongoose.Schema.Types.ObjectId, ref: "Job" },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
   sourceType: { type: String, enum: ["manual", "pdf", "csv", "json", "docx", "image_ocr", "url"], default: "manual" },
-  // User-defined import source label (e.g. LinkedIn, Upwork, Umurava, Referral)
   source: { type: String, default: "" },
-  rawText: { type: String, select: false } // don't return by default — avoids bloat
+  rawText: { type: String, select: false },
+
+  // BUG FIX #6: soft-delete field — when set, the record is "deleted" but recoverable
+  deletedAt: { type: Date, default: undefined, select: true },
+
 }, { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } });
+
+// Index to speed up the common "exclude deleted" queries
+applicantSchema.index({ userId: 1, deletedAt: 1 });
+applicantSchema.index({ jobId: 1, userId: 1, deletedAt: 1 });
 
 const Applicant = mongoose.model("Applicant", applicantSchema);
 export default Applicant;

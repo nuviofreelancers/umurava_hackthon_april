@@ -1,8 +1,73 @@
 import axios from "axios";
 
-// ── CV Extraction ──────────────────────────────────────────────────────────────
+const GEMINI_URL = (model: string) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+
+// Safe free-tier models in fallback order.
+// gemini-2.0-flash is the sweet spot: fast, capable, generous free quota.
+// gemini-1.5-flash and 1.5-flash-8b as backups.
+// DO NOT use "gemini-2.5-flash" — that model ID is invalid on free-tier keys and will always 429.
+const MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b"];
+
+// ── Retry helper for transient Gemini errors ──────────────────────────────────
+async function fetchWithRetry(payload: any, maxRetries = 4) {
+  let lastError: any;
+
+  // Overall deadline — prevents hanging across all retries/models
+  const overallDeadline = Date.now() + 90_000; // 90 seconds max total
+
+  for (const model of MODELS) {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      if (Date.now() > overallDeadline) {
+        throw new Error("Gemini API timed out — overall deadline exceeded");
+      }
+
+      try {
+        const res = await axios.post(GEMINI_URL(model), payload, { timeout: 60000 });
+        return res;
+      } catch (err: any) {
+        const status = err.response?.status;
+        lastError = err;
+
+        if (status === 429 || status === 503) {
+          // Respect Retry-After header if present, otherwise exponential backoff
+          const retryAfterHeader = err.response?.headers?.["retry-after"];
+          const retryAfterMs = retryAfterHeader
+            ? parseInt(retryAfterHeader, 10) * 1000
+            : Math.min(1000 * Math.pow(2, attempt) + Math.random() * 500, 30000);
+
+          console.warn(
+            `Gemini [${model}] attempt ${attempt + 1} got ${status} — retrying in ${Math.round(retryAfterMs / 1000)}s`
+          );
+          await new Promise(r => setTimeout(r, retryAfterMs));
+          continue;
+        }
+
+        // Non-retryable error on this model — move to next model
+        console.warn(`Gemini [${model}] non-retryable error ${status} — trying next model`);
+        break;
+      }
+    }
+  }
+
+  // All models exhausted
+  const status = lastError?.response?.status;
+  const geminiMsg = lastError?.response?.data?.error?.message;
+  const error = new Error(geminiMsg || lastError?.message || "Gemini API call failed");
+  (error as any).status = status;
+  throw error;
+}
+
+// ── CV Extraction ─────────────────────────────────────────────────────────────
 
 export const extractCV = async (text: string) => {
+  // FIX 3: Guard against empty/failed upstream file parsing (PDF, DOC, link)
+  if (!text || text.trim().length < 50) {
+    throw new Error(
+      "Extracted text is too short or empty — file parsing likely failed upstream (PDF/DOC/link)"
+    );
+  }
+
   const prompt = `You are a precise ATS data extraction engine. Your only job is to extract structured candidate data from the resume or CV text below.
 
 Rules:
@@ -40,15 +105,13 @@ Required output format:
 RESUME TEXT:
 ${text}`;
 
-  const res = await axios.post(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-    { contents: [{ parts: [{ text: prompt }] }] },
-    { timeout: 30000 }
-  ).catch((err) => {
-    const geminiError = err.response?.data?.error;
-    console.error("Gemini API error (extractCV):", geminiError || err.message);
-    throw new Error(geminiError?.message || "Gemini API call failed");
-  });
+  let res: any;
+  try {
+    res = await fetchWithRetry({ contents: [{ parts: [{ text: prompt }] }] });
+  } catch (err: any) {
+    console.error(`Gemini API error (extractCV) [${err.status}]:`, err.message);
+    throw err;
+  }
 
   let output = res.data.candidates[0].content.parts[0].text;
   output = output.replace(/```json/g, "").replace(/```/g, "").trim();
@@ -61,7 +124,7 @@ ${text}`;
   }
 };
 
-// ── AI Screening ───────────────────────────────────────────────────────────────
+// ── AI Screening ──────────────────────────────────────────────────────────────
 
 export const screenAI = async (job: any, applicants: any[], weights: any, shortlistSize?: number) => {
   const cleanJob = {
@@ -71,7 +134,7 @@ export const screenAI = async (job: any, applicants: any[], weights: any, shortl
     required_skills: job.required_skills || [],
     preferred_skills: job.preferred_skills || [],
     experience_level: job.experience_level || "",
-    education_required: job.education_level || ""
+    education_required: job.education_level || "",
   };
 
   const cleanApplicants = applicants.map(a => ({
@@ -80,10 +143,14 @@ export const screenAI = async (job: any, applicants: any[], weights: any, shortl
     current_role: a.current_role || a.headline || "",
     experience_years: a.experience_years ?? 0,
     education_level: a.education_level || "",
-    skills: (a.skills || []).map((s: any) => typeof s === "string" ? s : s.name)
+    skills: (a.skills || []).map((s: any) => (typeof s === "string" ? s : s.name)),
   }));
 
-  const topN = shortlistSize && shortlistSize < applicants.length ? shortlistSize : applicants.length;
+  // FIX 4: Correct shortlistSize falsy check (was broken when shortlistSize=0)
+  const topN =
+    shortlistSize != null && shortlistSize > 0 && shortlistSize < applicants.length
+      ? shortlistSize
+      : applicants.length;
 
   const prompt = `You are an expert, unbiased AI recruiter. Score and rank these applicants for the job below.
 
@@ -130,23 +197,30 @@ Return ONLY valid JSON. No markdown, no preamble.
   ]
 }`;
 
-  const res = await axios.post(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-    { contents: [{ parts: [{ text: prompt }] }] },
-    { timeout: 60000 }
-  ).catch((err) => {
-    const geminiError = err.response?.data?.error;
-    console.error("Gemini API error (screenAI):", geminiError || err.message);
-    throw new Error(geminiError?.message || "Gemini API call failed");
-  });
+  let res: any;
+  try {
+    res = await fetchWithRetry({ contents: [{ parts: [{ text: prompt }] }] });
+  } catch (err: any) {
+    console.error(`Gemini API error (screenAI) [${err.status}]:`, err.message);
+    throw err;
+  }
 
   let output = res.data.candidates[0].content.parts[0].text;
   output = output.replace(/```json/g, "").replace(/```/g, "").trim();
 
   try {
     const parsed = JSON.parse(output);
+
+    // FIX 2: Guard against missing/malformed candidates array in AI response
+    if (!parsed.candidates || !Array.isArray(parsed.candidates)) {
+      console.error("Screening response missing candidates array:", parsed);
+      throw new Error("AI screening response did not return a candidates array");
+    }
+
     return parsed.candidates;
-  } catch (err) {
+  } catch (err: any) {
+    // Re-throw structured errors from the guard above
+    if (err.message.includes("candidates array")) throw err;
     console.error("Screening parse error:", output);
     throw new Error("Invalid AI JSON from screening");
   }

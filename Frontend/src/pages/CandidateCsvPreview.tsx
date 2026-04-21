@@ -69,8 +69,8 @@ function CandidateEditor({ candidate, onChange, onRemove }) {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+      <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full">
           <div>
             <Label className="text-xs">Full Name *</Label>
             <Input value={candidate.full_name ?? ""} onChange={e => update("full_name", e.target.value)} className="mt-1" placeholder="Jane Doe" />
@@ -158,8 +158,7 @@ function CandidateEditor({ candidate, onChange, onRemove }) {
   );
 }
 
-// ── Candidate sidebar — FIX: outer row is now a <div role="button"> so the
-// inner trash <button> is not nested inside another <button>
+// ── Candidate sidebar 
 function CandidateSidebar({ candidates, selected, onSelect, onRemove, showWarnings = false }) {
   return (
     <aside className="w-64 shrink-0 flex flex-col bg-card border border-border rounded-xl overflow-hidden">
@@ -362,7 +361,7 @@ export default function CandidateCsvPreview() {
   const currentIssue = issueCandidates[selectedIssue];
 
   return (
-    <div className="flex flex-col gap-0 h-[calc(100vh-5rem)] min-h-0">
+    <div className="flex flex-col gap-0 h-full min-h-0">
       <div className="flex items-center justify-between mb-5 shrink-0">
         <div className="flex items-center gap-3">
           <button type="button" onClick={handleCancel} className="text-muted-foreground hover:text-foreground transition-colors">
@@ -394,7 +393,7 @@ export default function CandidateCsvPreview() {
         </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col" style={{height: "calc(100vh - 16rem)"}}>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0">
         <TabsList className="shrink-0 self-start mb-4">
           <TabsTrigger value="valid" className="gap-1.5">
             <CheckCircle className="w-3.5 h-3.5" />
@@ -414,7 +413,7 @@ export default function CandidateCsvPreview() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="valid" className="flex gap-5 mt-0 overflow-hidden" style={{height: "calc(100% - 2.5rem)"}}>
+        <TabsContent value="valid" className="flex flex-1 gap-5 mt-0 overflow-hidden min-h-0">
           {validCandidates.length === 0 ? (
             <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
               No valid candidates — fix issues in the "Needs Review" tab first.
@@ -432,7 +431,7 @@ export default function CandidateCsvPreview() {
           )}
         </TabsContent>
 
-        <TabsContent value="issues" className="flex gap-5 mt-0 overflow-hidden" style={{height: "calc(100% - 2.5rem)"}}>
+        <TabsContent value="issues" className="flex flex-1 gap-5 mt-0 overflow-hidden min-h-0">
           {issueCandidates.length === 0 ? (
             <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
               No issues — all candidates look good.

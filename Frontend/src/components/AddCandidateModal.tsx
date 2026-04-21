@@ -12,10 +12,11 @@ const SKILL_LEVELS = ["Beginner", "Intermediate", "Advanced", "Expert"];
 
 export default function AddCandidateModal({ jobs, onClose, onAdded }) {
   const { toast } = useToast();
-  const [saving, setSaving]     = useState(false);
+  const [saving, setSaving]         = useState(false);
   const [uploadMode, setUploadMode] = useState(false);
   const [skillInput, setSkillInput] = useState({ name: "", level: "Intermediate" });
   const [form, setForm] = useState({
+    // FIX: keep job_id as the field name — backend now accepts both job_id and jobId
     job_id: "", full_name: "", email: "", phone: "", location: "",
     skills: [], experience_years: 0, education_level: "Bachelor",
     education_field: "", current_role: "", current_company: "", portfolio_url: "",
@@ -34,21 +35,26 @@ export default function AddCandidateModal({ jobs, onClose, onAdded }) {
     setSkillInput({ name: "", level: "Intermediate" });
   };
 
-  const removeSkill = (name) => update("skills", form.skills.filter(s => (typeof s === "string" ? s : s.name) !== name));
+  const removeSkill = (name) =>
+    update("skills", form.skills.filter(s => (typeof s === "string" ? s : s.name) !== name));
 
   const save = async () => {
     if (!form.job_id) { toast({ title: "Please select a job", variant: "destructive" }); return; }
     if (!form.full_name.trim()) { toast({ title: "Full name is required", variant: "destructive" }); return; }
     if (!form.email.trim()) { toast({ title: "Email is required", variant: "destructive" }); return; }
     if (!form.current_role.trim()) { toast({ title: "Current role is required", variant: "destructive" }); return; }
-    if (!form.experience_years && form.experience_years !== 0) { toast({ title: "Experience years is required", variant: "destructive" }); return; }
     if (form.skills.length === 0) { toast({ title: "At least one skill is required", variant: "destructive" }); return; }
+
     setSaving(true);
     try {
       const coreFields = ["full_name", "email", "skills", "experience_years", "education_level", "current_role"];
       const filled = coreFields.filter(f => { const v = form[f]; return v && (Array.isArray(v) ? v.length > 0 : true); });
+
       await applicantsApi.create({
         ...form,
+        // FIX: send jobId explicitly (camelCase) so the backend createApplicant
+        // handler always finds it — it also reads job_id as fallback
+        jobId: form.job_id,
         source: "Manual Entry",
         profile_completeness: Math.round((filled.length / coreFields.length) * 100),
       });
@@ -71,25 +77,37 @@ export default function AddCandidateModal({ jobs, onClose, onAdded }) {
               onClick={() => setUploadMode(m => !m)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border hover:bg-muted transition-colors text-muted-foreground"
             >
-              {uploadMode ? <><PenLine className="w-3.5 h-3.5" /> Manual Entry</> : <><Upload className="w-3.5 h-3.5" /> Upload CV or Bulk</>}
+              {uploadMode
+                ? <><PenLine className="w-3.5 h-3.5" /> Manual Entry</>
+                : <><Upload className="w-3.5 h-3.5" /> Upload CV or Bulk</>}
             </button>
-            <button onClick={onClose} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+            <button onClick={onClose} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground">
+              <X className="w-4 h-4" />
+            </button>
           </div>
         </div>
 
         <div className="p-5 space-y-4">
+          {/* Job selector always visible — must be picked before upload works */}
           <div>
             <Label className="text-xs">Job Posting *</Label>
             <Select value={form.job_id} onValueChange={v => update("job_id", v)}>
               <SelectTrigger className="mt-1"><SelectValue placeholder="Select a job..." /></SelectTrigger>
               <SelectContent>
-                {jobs.map(j => <SelectItem key={j.id} value={j.id}>{j.title}</SelectItem>)}
+                {jobs.map(j => <SelectItem key={j.id} value={(j as any)._id?.toString() || j.id}>{j.title}</SelectItem>)}
               </SelectContent>
             </Select>
+            {/* FIX: show inline hint so users know to pick a job before uploading */}
+            {uploadMode && !form.job_id && (
+              <p className="text-[11px] text-amber-500 mt-1">← Select a job above before uploading</p>
+            )}
           </div>
 
           {uploadMode ? (
-            <ApplicantUpload jobId={form.job_id} onUploaded={() => { onAdded?.(); onClose(); }} />
+            <ApplicantUpload
+              jobId={form.job_id}
+              onUploaded={() => { onAdded?.(); onClose(); }}
+            />
           ) : (
             <>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -102,14 +120,17 @@ export default function AddCandidateModal({ jobs, onClose, onAdded }) {
                   <Label className="text-xs">Education Level</Label>
                   <Select value={form.education_level} onValueChange={v => update("education_level", v)}>
                     <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>{["None","High School","Associate","Bachelor","Master","PhD"].map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+                    <SelectContent>
+                      {["None","High School","Associate","Bachelor","Master","PhD"].map(t => (
+                        <SelectItem key={t} value={t}>{t}</SelectItem>
+                      ))}
+                    </SelectContent>
                   </Select>
                 </div>
                 <div><Label className="text-xs">Location</Label><Input value={form.location} onChange={e => update("location", e.target.value)} className="mt-1" placeholder="Kigali, Rwanda" /></div>
                 <div><Label className="text-xs">Portfolio / LinkedIn</Label><Input value={form.portfolio_url} onChange={e => update("portfolio_url", e.target.value)} className="mt-1" placeholder="https://..." /></div>
               </div>
 
-              {/* Skills — Umurava schema objects */}
               <div>
                 <Label className="text-xs">Skills</Label>
                 <div className="flex gap-2 mt-1">
@@ -122,13 +143,15 @@ export default function AddCandidateModal({ jobs, onClose, onAdded }) {
                   />
                   <Select value={skillInput.level} onValueChange={v => setSkillInput(p => ({ ...p, level: v }))}>
                     <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
-                    <SelectContent>{SKILL_LEVELS.map(l => <SelectItem key={l} value={l}>{l}</SelectItem>)}</SelectContent>
+                    <SelectContent>
+                      {SKILL_LEVELS.map(l => <SelectItem key={l} value={l}>{l}</SelectItem>)}
+                    </SelectContent>
                   </Select>
                   <Button type="button" variant="outline" size="icon" onClick={addSkill}><Plus className="w-4 h-4" /></Button>
                 </div>
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {form.skills.map(s => {
-                    const name = typeof s === "string" ? s : s.name;
+                    const name  = typeof s === "string" ? s : s.name;
                     const level = typeof s === "string" ? "" : s.level;
                     return (
                       <span key={name} className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary rounded-full text-[11px] font-medium">

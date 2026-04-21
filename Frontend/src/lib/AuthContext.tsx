@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { auth } from '@/api/backend';
+import { store } from '@/store';
 
 interface User {
   id: string;
@@ -44,17 +45,26 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     refreshUser();
   }, [refreshUser]);
 
+  useEffect(() => {
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === 'visible') {
+      refreshUser();
+    }
+  };
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+}, [refreshUser]);
+
   const login = async (email: string, password: string) => {
     const data = await auth.login(email, password);
     localStorage.setItem('hr_token', data.token);
     setUser(data.user);
   };
 
-  // Clears state only — navigation is handled by the caller (UserDropdown)
-  // so React Router's navigate() is used instead of window.location
   const logout = () => {
     localStorage.removeItem('hr_token');
     setUser(null);
+    store.dispatch({ type: "RESET_ALL" }); // clear all Redux state
   };
 
   return (
