@@ -28,6 +28,7 @@ export default function Candidates() {
   const page       = useSelector(s => (s.applicants as any).page);
 
   const [search, setSearch]               = useState("");
+  const [sourceFilter, setSourceFilter]   = useState("all");
   const [scheduling, setScheduling]       = useState(null);
   const [addingCandidate, setAddingCandidate] = useState(false);
   const [loadingMore, setLoadingMore]     = useState(false);
@@ -49,13 +50,21 @@ export default function Candidates() {
     setLoadingMore(false);
   };
 
+  // Collect unique user-defined source labels for the filter bar
+  const allSources = Array.from(new Set(
+    applicants.map(a => (a as any).source || (a as any).sourceType || "manual").filter(Boolean)
+  ));
+  const showSourceFilter = allSources.length > 1;
+
   const filtered = applicants.filter(a => {
-    if (!search) return true;
     const q = search.toLowerCase();
-    return (
+    const matchesSearch = !search || (
       a.full_name?.toLowerCase().includes(q) ||
       (a.skills || []).some(s => skillName(s).toLowerCase().includes(q))
     );
+    const matchesSource = sourceFilter === "all" ||
+      ((a as any).source || (a as any).sourceType || "manual") === sourceFilter;
+    return matchesSearch && matchesSource;
   });
 
   // FIX: check both .id and ._id on job objects since Mongoose virtuals
@@ -165,9 +174,34 @@ export default function Candidates() {
         </div>
       </div>
 
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input placeholder="Search by name or skill..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" />
+      <div className="space-y-3">
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input placeholder="Search by name or skill..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" />
+        </div>
+
+        {/* Source filter chips — only shown when candidates are from more than one source */}
+        {showSourceFilter && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-muted-foreground font-medium">Source:</span>
+            {["all", ...allSources].map(src => (
+              <button
+                key={src}
+                onClick={() => setSourceFilter(src)}
+                className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
+                  sourceFilter === src
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-muted text-muted-foreground border-border hover:border-primary/40"
+                }`}
+              >
+                {src === "all"
+                  ? `All (${applicants.length})`
+                  : `${src} (${applicants.filter(a => ((a as any).source || (a as any).sourceType || "manual") === src).length})`
+                }
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {filtered.length === 0 ? (
@@ -237,7 +271,7 @@ export default function Candidates() {
                   </div>
                   <div className="pt-2 border-t border-border flex items-center justify-between">
                     <span className="text-[10px] text-muted-foreground px-1.5 py-0.5 bg-muted rounded">
-                      {(a as any).sourceType || (a as any).source || "manual"}
+                      {(a as any).source || (a as any).sourceType || "manual"}
                     </span>
                     {/* FIX: only show job link if we can resolve the title */}
                     {jobTitle && jobId ? (

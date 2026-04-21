@@ -66,6 +66,8 @@ export const bulkCreateApplicants = async (req: AuthRequest, res: Response) => {
       userId: req.user!.id,
       jobId: job_id ? new mongoose.Types.ObjectId(job_id) : undefined,
       sourceType: sourceType || a.sourceType || "manual",
+      // Preserve user-defined source label (LinkedIn, Upwork, etc.)
+      source: a.source || "",
     }));
 
     const inserted = await Applicant.insertMany(docs, { ordered: false });

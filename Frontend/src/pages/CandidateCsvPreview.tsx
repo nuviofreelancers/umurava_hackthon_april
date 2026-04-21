@@ -18,8 +18,13 @@ function calculateCompleteness(c) {
   return Math.round((filled.length / fields.length) * 100);
 }
 
-const normSkills = (skills = []) =>
-  skills.map(s => typeof s === "string" ? { name: s, level: "Intermediate" } : s);
+const normSkills = (skills: any = []) => {
+  const arr = Array.isArray(skills) ? skills
+    : typeof skills === "string" && skills.trim()
+      ? skills.split(/[;|,]/).map((s: string) => s.trim()).filter(Boolean)
+      : [];
+  return arr.map((s: any) => typeof s === "string" ? { name: s, level: "Intermediate" } : s);
+};
 
 // ── Editable candidate card ────────────────────────────────────────────────────
 function CandidateEditor({ candidate, onChange, onRemove }) {
@@ -357,7 +362,7 @@ export default function CandidateCsvPreview() {
   const currentIssue = issueCandidates[selectedIssue];
 
   return (
-    <div className="flex flex-col gap-0">
+    <div className="flex flex-col gap-0 h-[calc(100vh-5rem)] min-h-0">
       <div className="flex items-center justify-between mb-5 shrink-0">
         <div className="flex items-center gap-3">
           <button type="button" onClick={handleCancel} className="text-muted-foreground hover:text-foreground transition-colors">

@@ -13,18 +13,34 @@ import { Sparkles } from "lucide-react";
 export default function ShortlistView({ results, applicants, job }) {
   const [expanded, setExpanded]     = useState(null);
   const [selected, setSelected]     = useState([]);
-  const [showTop, setShowTop]       = useState(10);
+  const [sourceFilter, setSourceFilter] = useState("all");
   const [sortBy, setSortBy]         = useState("rank");
   const [scheduling, setScheduling] = useState(false); // open the modal
   const [bannerDismissed, setBannerDismissed] = useState(false);
 
-  const sorted = [...results].sort((a, b) => {
-    if (sortBy === "rank")       return a.rank - b.rank;
-    if (sortBy === "score")      return b.match_score - a.match_score;
-    if (sortBy === "skills")     return (b.skills_score || 0) - (a.skills_score || 0);
-    if (sortBy === "experience") return (b.experience_score || 0) - (a.experience_score || 0);
-    return a.rank - b.rank;
-  }).slice(0, showTop);
+  // Derive unique sources across all results via their linked applicant records
+  const allSources = Array.from(new Set(
+    results
+      .map(r => applicants.find(a => a.id === r.applicant_id))
+      .filter(Boolean)
+      .map(a => (a as any).source || (a as any).sourceType || "manual")
+  ));
+  const showSourceFilter = allSources.length > 1;
+
+  const sorted = [...results]
+    .filter(r => {
+      if (sourceFilter === "all") return true;
+      const applicant = applicants.find(a => a.id === r.applicant_id);
+      const src = (applicant as any)?.source || (applicant as any)?.sourceType || "manual";
+      return src === sourceFilter;
+    })
+    .sort((a, b) => {
+      if (sortBy === "rank")       return a.rank - b.rank;
+      if (sortBy === "score")      return b.match_score - a.match_score;
+      if (sortBy === "skills")     return (b.skills_score || 0) - (a.skills_score || 0);
+      if (sortBy === "experience") return (b.experience_score || 0) - (a.experience_score || 0);
+      return a.rank - b.rank;
+    });
 
   const toggleSelect = (id) => {
     setSelected(prev =>
@@ -103,19 +119,24 @@ export default function ShortlistView({ results, applicants, job }) {
       {/* ── Controls bar ────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex gap-1">
-            {[10, 20].map(n => (
-              <button
-                key={n}
-                onClick={() => setShowTop(n)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                  showTop === n ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
-                }`}
-              >
-                Top {n}
-              </button>
-            ))}
-          </div>
+          {/* Source filter chips — only shown when candidates came from >1 source */}
+          {showSourceFilter && (
+            <div className="flex items-center gap-1 flex-wrap">
+              {["all", ...allSources].map(src => (
+                <button
+                  key={src}
+                  onClick={() => setSourceFilter(src)}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
+                    sourceFilter === src
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-muted text-muted-foreground border-border hover:border-primary/40"
+                  }`}
+                >
+                  {src === "all" ? `All (${results.length})` : src}
+                </button>
+              ))}
+            </div>
+          )}
           <select
             value={sortBy}
             onChange={e => setSortBy(e.target.value)}

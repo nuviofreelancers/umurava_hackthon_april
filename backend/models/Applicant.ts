@@ -57,6 +57,8 @@ const applicantSchema = new mongoose.Schema({
   jobId: { type: mongoose.Schema.Types.ObjectId, ref: "Job" },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
   sourceType: { type: String, enum: ["manual", "pdf", "csv", "json", "docx", "image_ocr", "url"], default: "manual" },
+  // User-defined import source label (e.g. LinkedIn, Upwork, Umurava, Referral)
+  source: { type: String, default: "" },
   rawText: { type: String, select: false } // don't return by default — avoids bloat
 }, { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } });
 
