@@ -442,20 +442,33 @@ export default function CandidateCsvPreview() {
                 onSelect={i => setSelectedIssue(i)} onRemove={i => removeCandidate(i, true)} showWarnings />
               {currentIssue && (
                 <div className="flex flex-col flex-1 gap-3 min-h-0">
-                  <div className="shrink-0 flex items-start gap-3 px-4 py-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-800">
-                    <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-                    <div className="text-xs">
-                      <p className="font-semibold mb-0.5">This resume is missing required fields</p>
-                      <p><span className="font-medium">Required: </span>{currentIssue._missingFields?.join(", ") || "—"}</p>
-                      {currentIssue._missingRecommended?.length > 0 && (
-                        <p className="mt-0.5 text-amber-600">
-                          <span className="font-medium">Also recommended: </span>
-                          {currentIssue._missingRecommended.join(", ")}
+                  {currentIssue._missingFields?.includes("__gdrive_auth__") ? (
+                    <div className="shrink-0 flex items-start gap-3 px-4 py-3 rounded-xl border border-red-200 bg-red-50 text-red-800">
+                      <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                      <div className="text-xs">
+                        <p className="font-semibold mb-0.5">Resume link couldn't be accessed</p>
+                        <p className="text-red-600">This Google Drive / Docs link requires sign-in or is restricted.</p>
+                        <p className="mt-1 text-red-600">
+                          Ask the candidate to share the file publicly ("Anyone with the link"), or fill in their details manually below.
                         </p>
-                      )}
-                      <p className="mt-1 text-amber-600">Fill in the fields below or remove this candidate from the import.</p>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="shrink-0 flex items-start gap-3 px-4 py-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-800">
+                      <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                      <div className="text-xs">
+                        <p className="font-semibold mb-0.5">This resume is missing required fields</p>
+                        <p><span className="font-medium">Required: </span>{currentIssue._missingFields?.join(", ") || "—"}</p>
+                        {currentIssue._missingRecommended?.length > 0 && (
+                          <p className="mt-0.5 text-amber-600">
+                            <span className="font-medium">Also recommended: </span>
+                            {currentIssue._missingRecommended.join(", ")}
+                          </p>
+                        )}
+                        <p className="mt-1 text-amber-600">Fill in the fields below or remove this candidate from the import.</p>
+                      </div>
+                    </div>
+                  )}
                   <CandidateEditor candidate={currentIssue}
                     onChange={c => updateCandidate(c, selectedIssue, issueCandidates, true)}
                     onRemove={() => removeCandidate(selectedIssue, true)} />

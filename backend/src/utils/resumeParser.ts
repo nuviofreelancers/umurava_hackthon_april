@@ -155,6 +155,12 @@ export async function extractTextFromUrl(url: string): Promise<string> {
 
   // Otherwise treat as HTML and scrape the text content
   const html = buffer.toString("utf-8");
+
+  // Detect Google auth-wall before wasting time parsing
+  if (isGoogleAuthWall(html)) {
+    throw new Error("__gdrive_auth__");
+  }
+
   const $ = cheerio.load(html);
 
   // Remove boilerplate elements
@@ -179,10 +185,60 @@ export async function extractTextFromUrl(url: string): Promise<string> {
 }
 
 function resolveGoogleDriveUrl(url: string): string {
-  // https://drive.google.com/file/d/FILE_ID/view → direct download
-  const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-  if (match) return `https://drive.google.com/uc?export=download&id=${match[1]}`;
+  // drive.google.com/file/d/FILE_ID/... → direct download
+  const driveFile = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (driveFile) return `https://drive.google.com/uc?export=download&id=${driveFile[1]}`;
+
+  // drive.google.com/open?id=FILE_ID
+  const driveOpen = url.match(/drive\.google\.com\/open\?id=([a-zA-Z0-9_-]+)/);
+  if (driveOpen) return `https://drive.google.com/uc?export=download&id=${driveOpen[1]}`;
+
+  // docs.google.com/document/d/FILE_ID/... → export as plain text
+  const docsDoc = url.match(/docs\.google\.com\/document\/d\/([a-zA-Z0-9_-]+)/);
+  if (docsDoc) return `https://docs.google.com/document/d/${docsDoc[1]}/export?format=txt`;
+
+  // docs.google.com/spreadsheets/d/FILE_ID/... → export as csv
+  const docsSheet = url.match(/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+  if (docsSheet) return `https://docs.google.com/spreadsheets/d/${docsSheet[1]}/export?format=csv`;
+
+  // docs.google.com/presentation/d/FILE_ID/... → export as plain text
+  const docsSlides = url.match(/docs\.google\.com\/presentation\/d\/([a-zA-Z0-9_-]+)/);
+  if (docsSlides) return `https://docs.google.com/presentation/d/${docsSlides[1]}/export?format=txt`;
+
   return url;
+}
+
+const GOOGLE_AUTH_WALL_SIGNATURES = [
+  "accounts.google.com/ServiceLogin",
+  "accounts.google.com/signin",
+  "SigninChallenge",
+  "grecaptcha.execute",
+  "<title>Google Drive</title>",
+  "You need access",
+  "Request access",
+];
+
+function isGoogleAuthWall(html: string): boolean {
+  return GOOGLE_AUTH_WALL_SIGNATURES.some(sig => html.includes(sig));
+}
+
+function makeUnreachableCandidate(url: string): ParsedCandidate {
+  return {
+    full_name: "", first_name: "", last_name: "",
+    email: "", phone: "", location: "", headline: "",
+    bio: "", current_role: "", current_company: "",
+    experience_years: 0, education_level: "", education_field: "",
+    portfolio_url: url,
+    skills: [], languages: [], experience: [], education: [],
+    certifications: [], projects: [],
+    socialLinks: { website: url },
+    availability: { status: "Available", type: "Full-time" },
+    sourceType: "url",
+    _parseConfidence: 0,
+    _needsReview: true,
+    _nonStandard: true,
+    _missingFields: ["__gdrive_auth__"],
+  };
 }
 
 // ─── Step 2: Heuristic field extraction from plain text ──────────────────────
@@ -303,13 +359,25 @@ function extractLocation(text: string, lines: string[]): string {
 }
 
 function extractSocialLinks(text: string): ParsedCandidate["socialLinks"] {
-  const linkedin  = text.match(/linkedin\.com\/in\/[a-zA-Z0-9\-_/]+/)?.[0];
-  const github    = text.match(/github\.com\/[a-zA-Z0-9\-_/]+/)?.[0];
-  const portfolio = text.match(/https?:\/\/(?!linkedin|github)[a-zA-Z0-9.\-/]+\.[a-z]{2,}[^\s]*/)?.[0];
+  // Match with or without https:// prefix, strip trailing punctuation
+  const cleanUrl = (raw: string, prefix: string): string => {
+    const stripped = raw.replace(/[)\]>.,;:'"]+$/, "").trim();
+    return /^https?:\/\//i.test(stripped) ? stripped : `${prefix}${stripped}`;
+  };
+
+  const linkedinMatch = text.match(/(?:https?:\/\/)?(?:www\.)?linkedin\.com\/in\/[a-zA-Z0-9\-_%]+\/?/i);
+  const githubMatch   = text.match(/(?:https?:\/\/)?(?:www\.)?github\.com\/[a-zA-Z0-9\-_%]+\/?/i);
+
+  const linkedin = linkedinMatch ? cleanUrl(linkedinMatch[0], "https://") : undefined;
+  const github   = githubMatch   ? cleanUrl(githubMatch[0],   "https://") : undefined;
+
+  // Portfolio: any URL that isn't LinkedIn or GitHub
+  const allUrls  = [...text.matchAll(/https?:\/\/[^\s\])[>\'"]+/gi)].map(m => m[0].replace(/[)\]>.,;:\'"]+$/, ""));
+  const portfolio = allUrls.find(u => !/linkedin\.com|github\.com/i.test(u));
 
   return {
-    linkedin:  linkedin  ? `https://${linkedin}` : undefined,
-    github:    github    ? `https://${github}`   : undefined,
+    linkedin,
+    github,
     portfolio: portfolio ?? undefined,
     website:   portfolio ?? undefined,
   };
@@ -790,7 +858,18 @@ export async function parseFileToCandidate(
 
 /** Parse a URL → structured candidate (no AI) */
 export async function parseUrlToCandidate(url: string): Promise<ParsedCandidate> {
-  const text = await extractTextFromUrl(url);
+  let text: string;
+  try {
+    text = await extractTextFromUrl(url);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg === "__gdrive_auth__") {
+      logger.warn(`[parseUrlToCandidate] Google auth-wall hit for: ${url}`);
+      return makeUnreachableCandidate(url);
+    }
+    throw err;
+  }
+
   const candidate = parseResumeText(text, "url");
   delete candidate._rawText;
 

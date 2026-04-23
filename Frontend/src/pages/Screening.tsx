@@ -31,7 +31,7 @@ export default function Screening() {
   const dispatch   = useDispatch();
   const jobs       = useSelector((s: any) => s.jobs.list);
   const results    = useSelector((s: any) => s.results.list);
-  const applicants = useSelector((s: any) => s.applicants.list);
+  const applicants = useSelector((s: any) => s.applicants.allList);
   const loading    = useSelector((s: any) => s.jobs.loading);
 
   const [scheduling, setScheduling]       = useState<any>(null);

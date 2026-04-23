@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
-import { fetchApplicants, deleteApplicant } from "@/store/applicantsSlice";
+import { fetchApplicants, deleteApplicant, restoreApplicant } from "@/store/applicantsSlice";
 import { fetchJobs } from "@/store/jobSlice";
 import { fetchResults } from "@/store/resultsSlice";
 import { User, Search, Briefcase, MapPin, GraduationCap, Trash2, CalendarPlus, UserPlus, Download } from "lucide-react";
@@ -133,7 +133,7 @@ export default function Candidates() {
       duration: 5000,
       action: (
         <button
-          onClick={() => { undone = true; clearTimeout(undoRef.current); dispatch(fetchApplicants()); dismiss(); }}
+          onClick={() => { undone = true; clearTimeout(undoRef.current); dispatch(restoreApplicant(a.id) as any); dismiss(); }}
           className="px-3 py-1 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
         >Undo</button>
       ),

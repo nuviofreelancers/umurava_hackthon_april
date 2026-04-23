@@ -13,9 +13,9 @@ export function validateResume(cv: Record<string, unknown>): ValidationResult {
   if (!cv.email) missing.push("email");
   if (!cv.headline) warnings.push("headline missing — will be auto-generated");
   if (!cv.location) warnings.push("location not found");
-  if (!cv.skills?.length) warnings.push("no skills extracted");
-  if (!cv.experience?.length) warnings.push("no work experience found");
-  if (!cv.education?.length) warnings.push("no education history found");
+  if (!(cv.skills as unknown[])?.length) warnings.push("no skills extracted");
+  if (!(cv.experience as unknown[])?.length) warnings.push("no work experience found");
+  if (!(cv.education as unknown[])?.length) warnings.push("no education history found");
 
   return {
     valid: missing.length === 0,

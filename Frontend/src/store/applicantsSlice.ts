@@ -41,7 +41,8 @@ export const bulkCreateApplicants = createAsyncThunk(
     applicantsApi.bulkCreate(data, jobId, sourceType)
 );
 export const updateApplicant = createAsyncThunk("applicants/update", ({ id, data }: { id: string; data: unknown }) => applicantsApi.update(id, data));
-export const deleteApplicant = createAsyncThunk("applicants/delete", (id: string) => applicantsApi.delete(id).then(() => id));
+export const deleteApplicant   = createAsyncThunk("applicants/delete",   (id: string) => applicantsApi.delete(id).then(() => id));
+export const restoreApplicant = createAsyncThunk("applicants/restore", (id: string) => applicantsApi.restore(id));
 
 const applicantsSlice = createSlice({
   name: "applicants",
@@ -126,7 +127,21 @@ const applicantsSlice = createSlice({
 
       .addCase(deleteApplicant.fulfilled, (state, action) => {
         state.list = (state.list as { id: string }[]).filter(a => a.id !== action.payload);
+        state.allList = (state.allList as { id: string }[]).filter(a => a.id !== action.payload);
         state.total = Math.max(0, state.total - 1);
+      })
+
+      .addCase(restoreApplicant.fulfilled, (state, action) => {
+        const restored = action.payload as any;
+        const id = restored.id || restored._id?.toString();
+        // Add back to both lists if not already present
+        if (!(state.list as { id: string }[]).find(a => a.id === id)) {
+          (state.list as unknown[]).unshift({ ...restored, id });
+          state.total += 1;
+        }
+        if (!(state.allList as { id: string }[]).find(a => a.id === id)) {
+          (state.allList as unknown[]).unshift({ ...restored, id });
+        }
       });
   },
 });

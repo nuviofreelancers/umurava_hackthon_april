@@ -98,6 +98,7 @@ export interface IApplicant extends Document {
   // App Metadata
   jobId?: Types.ObjectId;
   userId?: Types.ObjectId;
+  source?: string;                // human-readable label e.g. "LinkedIn", "Referral", or custom
   sourceType: "manual" | "pdf" | "csv" | "json" | "docx" | "image_ocr" | "url";
   interview_status: "not_scheduled" | "scheduled" | "completed" | "cancelled";
   interview_date?: Date;
@@ -214,6 +215,7 @@ const ApplicantSchema = new Schema<IApplicant>(
     // App Metadata
     jobId:  { type: Schema.Types.ObjectId, ref: "Job" },
     userId: { type: Schema.Types.ObjectId, ref: "User" },
+    source:     { type: String, trim: true },   // human-readable origin label (free-form)
     sourceType: {
       type: String,
       enum: ["manual", "pdf", "csv", "json", "docx", "image_ocr", "url"],

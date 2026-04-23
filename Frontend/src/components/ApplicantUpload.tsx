@@ -36,6 +36,11 @@ function tagCandidate(c, jobId, techSource, sourceLabel) {
 // ── Source tag step shown after file select, before upload fires ──────────────
 function SourceTagStep({ fileName, onConfirm, onCancel, uploading }) {
   const [sourceLabel, setSourceLabel] = useState("Direct Upload");
+  const [customSource, setCustomSource] = useState("");
+
+  const isOther = sourceLabel === "Other";
+  const effectiveSource = isOther ? customSource.trim() : sourceLabel;
+  const canUpload = !uploading && (!isOther || customSource.trim().length > 0);
 
   return (
     <div className="space-y-3">
@@ -55,6 +60,17 @@ function SourceTagStep({ fileName, onConfirm, onCancel, uploading }) {
             {SOURCE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
           </SelectContent>
         </Select>
+
+        {isOther && (
+          <Input
+            autoFocus
+            placeholder="e.g. AngelList, Job Fair, Instagram…"
+            value={customSource}
+            onChange={e => setCustomSource(e.target.value)}
+            className="text-sm"
+          />
+        )}
+
         <p className="text-[10px] text-muted-foreground">
           Tags this batch so you can filter by source after screening.
         </p>
@@ -64,7 +80,7 @@ function SourceTagStep({ fileName, onConfirm, onCancel, uploading }) {
         <Button variant="outline" size="sm" className="flex-1" onClick={onCancel} disabled={uploading}>
           Cancel
         </Button>
-        <Button size="sm" className="flex-1 gap-1.5" onClick={() => onConfirm(sourceLabel)} disabled={uploading}>
+        <Button size="sm" className="flex-1 gap-1.5" onClick={() => onConfirm(effectiveSource)} disabled={!canUpload}>
           {uploading
             ? <><div className="w-3.5 h-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" /> Parsing…</>
             : <><Upload className="w-3.5 h-3.5" /> Upload</>}

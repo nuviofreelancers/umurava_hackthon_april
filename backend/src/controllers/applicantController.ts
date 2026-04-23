@@ -127,7 +127,7 @@ export async function bulkCreateApplicants(req: AuthRequest, res: Response, next
     const existingEmails = new Set<string>();
 
     if (emails.length > 0) {
-      const existingFilter: Record<string, unknown> = { email: { $in: emails }, userId: req.user!.id };
+      const existingFilter: Record<string, unknown> = { email: { $in: emails }, userId: req.user!.id, isDeleted: false };
       if (effectiveJobId) existingFilter.jobId = effectiveJobId;
       const existing = await Applicant.find(existingFilter).select("email");
       existing.forEach((e) => existingEmails.add(e.email.toLowerCase()));
@@ -255,7 +255,7 @@ export async function parseUploadedCandidates(
         res.status(422).json({ message: "The URL does not appear to contain a resume" });
         return;
       }
-      const normalized = normalizeCandidate(candidate as Record<string, unknown>);
+      const normalized = normalizeCandidate(candidate as unknown as Record<string, unknown>);
       return res.json({ count: 1, candidates: [{ ...normalized, sourceType: "url" }], sourceType: "url" }) as unknown as void;
     }
 
@@ -300,7 +300,7 @@ export async function parseUploadedCandidates(
       return;
     }
 
-    const normalized = normalizeCandidate(candidate as Record<string, unknown>);
+    const normalized = normalizeCandidate(candidate as unknown as Record<string, unknown>);
     res.json({ count: 1, candidates: [normalized], sourceType: candidate.sourceType });
   } catch (err: unknown) {
     const error = err as Error & { status?: number };
