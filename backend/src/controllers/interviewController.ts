@@ -18,10 +18,19 @@ export async function scheduleInterview(req: AuthRequest, res: Response, next: N
       return;
     }
 
-    const { interview_date, interview_platform, interview_link, job_title } = req.body as {
+    const {
+      interview_date,
+      interview_platform,
+      interview_link,
+      interview_location,
+      interview_notes,
+      job_title,
+    } = req.body as {
       interview_date?: string;
       interview_platform?: string;
       interview_link?: string;
+      interview_location?: string;
+      interview_notes?: string;
       job_title?: string;
     };
 
@@ -37,7 +46,9 @@ export async function scheduleInterview(req: AuthRequest, res: Response, next: N
           interview_status:   "scheduled",
           interview_date:     new Date(interview_date),
           interview_platform: interview_platform ?? "",
-          interview_link:     interview_link ?? "",
+          interview_link:     interview_link     ?? "",
+          interview_location: interview_location ?? "",
+          notes:              interview_notes    ?? "",
         },
       },
       { new: true }
@@ -53,10 +64,12 @@ export async function scheduleInterview(req: AuthRequest, res: Response, next: N
       sendInterviewEmail({
         to:            applicant.email,
         candidateName: applicant.full_name,
-        jobTitle:      job_title ?? "Open Position",
+        jobTitle:      job_title          ?? "Open Position",
         interviewDate: new Date(interview_date),
         platform:      interview_platform ?? "TBD",
         link:          interview_link,
+        location:      interview_location,
+        notes:         interview_notes,
       }).catch((err: Error) => logger.warn("Interview email failed:", err.message));
     }
 

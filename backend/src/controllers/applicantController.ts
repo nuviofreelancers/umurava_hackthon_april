@@ -256,7 +256,18 @@ export async function parseUploadedCandidates(
         return;
       }
       const normalized = normalizeCandidate(candidate as unknown as Record<string, unknown>);
-      return res.json({ count: 1, candidates: [{ ...normalized, sourceType: "url" }], sourceType: "url" }) as unknown as void;
+      return res.json({
+        count: 1,
+        candidates: [{
+          ...normalized,
+          sourceType: "url",
+          _nonStandard:     candidate._nonStandard,
+          _needsReview:     candidate._needsReview,
+          _parseConfidence: candidate._parseConfidence,
+          _missingFields:   candidate._missingFields,
+        }],
+        sourceType: "url",
+      }) as unknown as void;
     }
 
     // ── Branch: File upload ───────────────────────────────────────────────────
@@ -301,7 +312,17 @@ export async function parseUploadedCandidates(
     }
 
     const normalized = normalizeCandidate(candidate as unknown as Record<string, unknown>);
-    res.json({ count: 1, candidates: [normalized], sourceType: candidate.sourceType });
+    res.json({
+      count: 1,
+      candidates: [{
+        ...normalized,
+        _nonStandard:     candidate._nonStandard,
+        _needsReview:     candidate._needsReview,
+        _parseConfidence: candidate._parseConfidence,
+        _missingFields:   candidate._missingFields,
+      }],
+      sourceType: candidate.sourceType,
+    });
   } catch (err: unknown) {
     const error = err as Error & { status?: number };
     logger.error("parseUploadedCandidates error:", error.message);

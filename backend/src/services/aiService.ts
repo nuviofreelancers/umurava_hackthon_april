@@ -151,43 +151,124 @@ export interface ExtractedCV {
 
 export async function extractCV(text: string): Promise<ExtractedCV> {
   const prompt = `
-You are an expert HR data extraction system. Your sole task is to parse the resume text below and return a single valid JSON object.
+You are a senior HR data engineer. Your only job is to extract structured data from resume text.
+You never generate, invent, embellish, or pad. You output silence (omit the field) rather than noise.
 
-STRICT RULES:
-1. OUTPUT: Return ONLY raw JSON. No markdown fences, no prose, no explanation.
-2. NOT A RESUME: If the text is clearly not a CV/resume, return exactly: {"error":"not_a_resume"}
-3. NO HALLUCINATION: Extract ONLY information explicitly present in the text.
-4. MISSING FIELDS: Omit fields entirely if absent — do NOT use null, "N/A", or empty placeholders.
-5. DATES: Use "YYYY-MM" for start/end dates. Use "Present" for current roles.
-6. SKILLS LEVEL: Exactly one of: "Beginner" | "Intermediate" | "Advanced" | "Expert"
-7. LANGUAGE PROFICIENCY: Exactly: "Basic" | "Conversational" | "Fluent" | "Native"
-8. AVAILABILITY STATUS: Exactly: "Available" | "Open to Opportunities" | "Not Available"
-9. AVAILABILITY TYPE: Exactly: "Full-time" | "Part-time" | "Contract"
-10. EDUCATION LEVEL: Exactly: "High School" | "Associate" | "Bachelor" | "Master" | "PhD" | "Other"
-11. NAME: Provide first_name, last_name, AND full_name.
-12. HEADLINE: Synthesize a 6-12 word professional title from their most recent role and key skills.
-13. EXPERIENCE_YEARS: Calculate total professional years from all experience entries. Round to 0.5.
-14. SOCIAL LINKS: Only include verifiable URLs explicitly present in the text.
+STEP 1 — IS THIS ACTUALLY A RESUME?
+Before doing anything, ask: does this text clearly belong to a specific person and describe their professional history?
+Signs it is NOT a resume: it's a webpage with navigation links, a news article, a job description, a LinkedIn feed, random scraped text, or a document with no personal info.
+If it is NOT a resume → output exactly this and nothing else: {"error":"not_a_resume"}
+If you are unsure → output {"error":"not_a_resume"} anyway. It is better to reject than to hallucinate.
 
-REQUIRED JSON STRUCTURE:
+STEP 2 — HARD RULES (these override everything else):
+R1. Output ONLY raw JSON. No markdown, no backticks, no prose, no explanations.
+R2. OMIT any field you do not have real data for. Never use null, "", "N/A", "Unknown", "Not specified", or placeholder text.
+R3. Never invent, assume, or infer anything not explicitly written in the text.
+R4. If a section exists but is illegible, garbled, or too short to parse, omit that whole section.
+
+STEP 3 — FIELD-BY-FIELD RULES:
+
+NAME
+- Extract first_name, last_name, and full_name separately.
+- If you cannot find a clear human name, omit all three and return {"error":"not_a_resume"}.
+
+EMAIL / PHONE
+- Extract exactly as written. Email → lowercase. Phone → keep country code if present.
+- If absent, omit entirely.
+
+LOCATION
+- Format: "City, Country". If only a city is present, use just "City".
+- If absent or ambiguous, omit.
+
+HEADLINE
+- Only include if you have at least a role AND one skill to work with.
+- Format: "[Seniority] [Role] specializing in [Skill1] and [Skill2]"
+- If the profile is too sparse to write a meaningful headline, omit it.
+
+BIO
+- Only write a bio if you have at least 3 distinct facts about the person (role, skills, experience length, or education).
+- Write exactly 2 factual sentences. No opinions, no filler ("passionate", "dynamic", "results-driven").
+- If fewer than 3 facts are available, omit bio entirely.
+
+EXPERIENCE_YEARS
+- Calculate by summing non-overlapping date ranges from the experience array.
+- Round to nearest 0.5.
+- If NO dates exist anywhere in the resume, omit experience_years entirely. Do NOT guess.
+
+SKILLS
+- Extract only skills explicitly named in the text (tools, languages, frameworks, methodologies).
+- Do NOT infer skills from job titles or company names alone.
+- Level inference (use the LOWEST level that fits the evidence):
+    "Expert"       → explicitly called expert/lead/architect OR 5+ years stated for that specific skill
+    "Advanced"     → 3-5 years stated, or senior-level role context clearly tied to that skill
+    "Intermediate" → 1-3 years stated, or clearly used regularly in a described role
+    "Beginner"     → explicitly described as learning, trainee, exposure, or < 1 year
+    OMIT level field entirely → if there is zero evidence of proficiency level. Do not default to Intermediate.
+- yearsOfExperience: only include if a number is explicitly stated for that specific skill. Omit otherwise.
+
+EXPERIENCE (work history entries)
+- Only include entries that have at minimum a company name OR a role title.
+- startDate / endDate: format "YYYY-MM". Use "Present" for current. If a date is missing for an entry, omit that date field entirely — do not guess.
+- description: only include if there is actual descriptive text in the resume. Do not summarise the job title as a description.
+- technologies: only list items explicitly mentioned in that specific job entry.
+
+EDUCATION
+- Only include entries with at minimum an institution name OR a degree name.
+- Degree level mapping: PhD/Doctorate→"PhD" | Master/MSc/MBA/MEng→"Master" | Bachelor/BSc/BA/BEng/BE→"Bachelor" | Associate→"Associate" | Diploma/HND/Secondary/High School→"High School"
+- startYear / endYear: only include if explicitly stated as a year number. Never infer.
+
+CERTIFICATIONS / PROJECTS
+- Only include if explicitly named in the text. Do not infer from skills or experience descriptions.
+
+SOCIAL LINKS
+- Only include URLs that literally appear in the text. Never construct or guess URLs from a person's name.
+
+AVAILABILITY
+- Default to { "status": "Available", "type": "Full-time" } ONLY if no contradicting information exists.
+- If the text says "not looking", "currently employed and not seeking", or similar → use "Not Available".
+
+STEP 4 — OUTPUT STRUCTURE (omit any key with no real data):
 {
-  "first_name": "string", "last_name": "string", "full_name": "string",
-  "email": "string", "phone": "string", "headline": "string",
-  "bio": "string (2-4 sentence professional summary)",
-  "location": "string (City, Country)", "current_role": "string", "current_company": "string",
-  "experience_years": number, "education_level": "Bachelor", "education_field": "string",
-  "skills": [{ "name": "string", "level": "Advanced", "yearsOfExperience": number }],
+  "first_name": "string",
+  "last_name": "string",
+  "full_name": "string",
+  "email": "string",
+  "phone": "string",
+  "headline": "string",
+  "bio": "string",
+  "location": "string",
+  "current_role": "string",
+  "current_company": "string",
+  "experience_years": 0,
+  "education_level": "Bachelor",
+  "education_field": "string",
+  "skills": [{ "name": "string", "level": "Intermediate", "yearsOfExperience": 0 }],
   "languages": [{ "name": "string", "proficiency": "Fluent" }],
-  "experience": [{ "company": "string", "role": "string", "startDate": "YYYY-MM", "endDate": "YYYY-MM or Present", "description": "string", "technologies": ["string"], "isCurrent": false }],
-  "education": [{ "institution": "string", "degree": "string", "fieldOfStudy": "string", "startYear": number, "endYear": number }],
+  "experience": [{
+    "company": "string",
+    "role": "string",
+    "startDate": "YYYY-MM",
+    "endDate": "YYYY-MM or Present",
+    "description": "string",
+    "technologies": ["string"],
+    "isCurrent": false
+  }],
+  "education": [{
+    "institution": "string",
+    "degree": "string",
+    "fieldOfStudy": "string",
+    "startYear": 0,
+    "endYear": 0
+  }],
   "certifications": [{ "name": "string", "issuer": "string", "issueDate": "YYYY-MM" }],
-  "projects": [{ "name": "string", "description": "string", "technologies": ["string"], "role": "string", "link": "string", "startDate": "YYYY-MM", "endDate": "YYYY-MM" }],
+  "projects": [{ "name": "string", "description": "string", "technologies": ["string"], "role": "string", "link": "string" }],
   "availability": { "status": "Available", "type": "Full-time" },
-  "socialLinks": { "linkedin": "string", "github": "string", "portfolio": "string" },
+  "socialLinks": { "linkedin": "string", "github": "string", "portfolio": "string", "website": "string" },
   "portfolio_url": "string"
 }
 
 RESUME TEXT:
+
 ${text.slice(0, 12000)}
 `.trim();
 
@@ -257,71 +338,134 @@ export async function screenAI(
   };
 
   const candidateSummaries = applicants.map((a) => {
-    const skillNames = (a.skills ?? []).map((s) =>
-      typeof s === "string" ? s : `${s.name}${s.level ? ` (${s.level})` : ""}${s.yearsOfExperience ? ` ${s.yearsOfExperience}yr` : ""}`
-    ).join(", ");
-    const expSummary = (a.experience ?? []).slice(0, 4)
-      .map((e) => `${e.role} @ ${e.company} [${e.startDate ?? "?"}–${e.endDate ?? "Present"}]${e.technologies?.length ? ` | Tech: ${e.technologies.slice(0, 6).join(", ")}` : ""}`)
-      .join(" | ");
+    const skillNames = (a.skills ?? [])
+      .map((s) => typeof s === "string" ? s : `${s.name}${s.level ? ` (${s.level})` : ""}${s.yearsOfExperience ? ` ${s.yearsOfExperience}yr` : ""}`)
+      .join(", ");
+    const expSummary = (a.experience ?? []).slice(0, 5)
+      .map((e) => `${e.role} @ ${e.company} [${e.startDate ?? "?"}–${e.endDate ?? "Present"}]${e.technologies?.length ? ` | Tech: ${e.technologies.slice(0, 5).join(", ")}` : ""}${e.description ? ` | ${e.description.slice(0, 120)}` : ""}`)
+      .join("\n  ");
     const eduSummary = (a.education ?? [])
       .map((e) => `${e.degree}${e.fieldOfStudy ? ` in ${e.fieldOfStudy}` : ""} @ ${e.institution}${e.endYear ? ` (${e.endYear})` : ""}`)
       .join("; ");
     const certSummary = (a.certifications ?? []).map((c) => c.name).join(", ");
     const projSummary = (a.projects ?? []).slice(0, 3)
-      .map((p) => `${p.name}${p.technologies?.length ? ` [${p.technologies.slice(0, 4).join(", ")}]` : ""}`)
-      .join("; ");
+      .map((p) => `${p.name}${p.technologies?.length ? ` [${p.technologies.slice(0, 4).join(", ")}]` : ""}${p.description ? `: ${p.description.slice(0, 80)}` : ""}`)
+      .join(" | ");
+    const langSummary = (a.languages ?? []).map((l) => `${l.name} (${l.proficiency})`).join(", ");
+
     return `CANDIDATE_ID: ${a._id}
-Name: ${a.full_name}
-Headline: ${a.headline ?? "—"}
-Location: ${a.location ?? "—"}
-Experience: ${a.experience_years ?? "?"} years | Education: ${a.education_level ?? "—"}
-Availability: ${a.availability?.status ?? "Unknown"} (${a.availability?.type ?? "—"})
+Name: ${a.full_name} | Headline: ${a.headline ?? "—"}
+Location: ${a.location ?? "—"} | Availability: ${a.availability?.status ?? "Unknown"} ${a.availability?.type ?? ""}
+Experience: ${a.experience_years ?? "?"} yrs total | Education: ${a.education_level ?? "—"}
 Skills: ${skillNames || "—"}
-Work History: ${expSummary || "—"}
+Work History:
+  ${expSummary || "—"}
 Education: ${eduSummary || "—"}
 Certifications: ${certSummary || "—"}
-Projects: ${projSummary || "—"}`;
+Projects: ${projSummary || "—"}
+Languages: ${langSummary || "—"}`;
   }).join("\n\n---\n\n");
 
   const prompt = `
-You are TalentScreen's senior AI recruiter — an objective, bias-aware talent evaluation engine.
-Evaluate and rank ${applicants.length} candidate(s) against the job specification below.
+You are TalentScreen's AI talent evaluator — an objective, evidence-based recruiter with no biases.
+Your task: evaluate ${applicants.length} candidate(s) against the job spec below and produce ranked screening results.
 
+═══════════════════════════════════════
 JOB SPECIFICATION
-Title: ${job.title} | Department: ${job.department} | Type: ${job.employment_type} | Level: ${job.experience_level}
+═══════════════════════════════════════
+Title: ${job.title}
+Department: ${job.department} | Type: ${job.employment_type} | Level: ${job.experience_level}
 Required Skills: ${job.required_skills.join(", ") || "None specified"}
 Preferred Skills: ${job.preferred_skills.join(", ") || "None specified"}
-Description: ${job.description.slice(0, 2000)}
+Job Description:
+${job.description.slice(0, 2000)}
 
-SCORING WEIGHTS: Skills ${w.skills}% | Experience ${w.experience}% | Education ${w.education}% | Relevance ${w.relevance}%
+═══════════════════════════════════════
+SCORING SYSTEM
+═══════════════════════════════════════
+Score each dimension 0-100 using the rubric below. Then compute:
+match_score = (skills_score × ${w.skills} + experience_score × ${w.experience} + education_score × ${w.education} + relevance_score × ${w.relevance}) / 100
+Round match_score to nearest integer.
 
-SCORING RUBRIC (0-100 per dimension):
-SKILLS: 100=all required at Expert/Advanced + preferred | 80=all required present | 60=most required | 40=partial | 0=missing critical
-EXPERIENCE: 100=direct match, correct seniority, impact-driven descriptions | 80=highly relevant | 60=adjacent domain | 40=transferable | 0=irrelevant
-EDUCATION: 100=exact degree+field | 80=correct level+field | 60=related degree | 40=unrelated | 0=none (exceptional experience can compensate)
-RELEVANCE: 100=perfect culture/domain/project fit | 80=strong alignment | 60=some misalignments | 40=significant ramp-up needed | 0=poor fit
+SKILLS (${w.skills}% weight):
+  100 = All required skills present at Advanced/Expert + majority of preferred skills
+  80  = All required skills present
+  60  = Most required skills present (missing 1-2 minor ones)
+  40  = Partial match — has transferable or adjacent skills
+  20  = Few relevant skills
+  0   = Missing all required skills
 
-COMPOSITE: match_score = (skills*${w.skills} + experience*${w.experience} + education*${w.education} + relevance*${w.relevance}) / 100 — round to integer
+EXPERIENCE (${w.experience}% weight):
+  100 = Direct role match at exact seniority, with measurable impact in descriptions
+  80  = Highly relevant domain with appropriate years
+  60  = Adjacent domain or slightly under/over-qualified
+  40  = Transferable experience but significant domain gap
+  20  = Very limited relevant experience
+  0   = Irrelevant background
 
-CONFIDENCE: "High"=complete detailed profile | "Medium"=some gaps, score +/-10 | "Low"=sparse profile, indicative only
-RECOMMENDATION: "Strong Yes">=82 no dealbreakers | "Yes">=68 no dealbreakers | "Maybe">=50 or recoverable gaps | "No"<50 or critical gaps
+EDUCATION (${w.education}% weight):
+  100 = Exact degree + field match for the role
+  80  = Correct level, adjacent field
+  60  = Different level but compensated by experience
+  40  = Unrelated degree
+  0   = No formal education (exceptional experience CAN compensate — use judgment)
 
-BIAS CHECK — MANDATORY: flag in bias_flags any scoring influence from: gender-coded language, career gap penalization, institution prestige bias, non-English profile penalization, or any non-merit factor. Empty array if none.
+RELEVANCE (${w.relevance}% weight):
+  100 = Ideal culture/domain/project fit — candidate would need zero ramp-up
+  80  = Strong fit with minor gaps
+  60  = Reasonable fit but 1-2 misalignments (location, availability, domain)
+  40  = Needs significant onboarding
+  0   = Poor overall fit
 
-TIE-BREAKING: 1) higher skills_score 2) higher experience_score 3) High > Medium > Low confidence 4) more direct experience years
+═══════════════════════════════════════
+OUTPUT RULES
+═══════════════════════════════════════
+1. Return ONLY a raw JSON array. No markdown, no preamble, no code fences.
+2. applicant_id MUST exactly match the CANDIDATE_ID shown for each candidate. Do not alter it.
+3. Rank starts at 1 (best match). Every candidate appears exactly once.
 
-OUTPUT RULES:
-- Return ONLY a raw JSON array. No markdown, no preamble.
-- Every candidate appears exactly once. Rank starts at 1.
-- applicant_id must match CANDIDATE_ID exactly.
-- strengths: 2-5 specific evidence-based points (not generic praise)
-- gaps: 1-4 items each with description and type ("dealbreaker" or "nice-to-have")
-- ${shortlistSize ? `Return only the top ${shortlistSize} candidates` : "Return ALL candidates ranked"}
+4. strengths — strict rules:
+   - Only write strengths directly evidenced by data in the candidate's profile above.
+   - Name the specific skill, role, company, project, or achievement you are referencing.
+   - If a candidate has a sparse profile (few skills, no experience detail, no projects), write FEWER strengths — 1 is acceptable.
+   - NEVER write: "good communicator", "team player", "fast learner", "passionate", or any trait not supported by data.
+   - If you cannot find any genuine strength relevant to this job: ["Insufficient profile data to assess strengths"]
+
+5. gaps — strict rules:
+   - Be specific. "Missing Python experience" is acceptable. "Lacks technical skills" is not.
+   - If a required skill from the job spec is absent from the candidate's profile, it is a gap — name the skill.
+   - If experience_years is significantly below the job level, note it with the actual numbers.
+   - type "dealbreaker" = missing something the job explicitly requires and cannot be taught quickly.
+   - type "nice-to-have" = missing a preferred skill or minor misalignment.
+
+6. confidence_level — reflects data quality, not match quality:
+   "High"   = candidate has a skills list + at least 2 experience entries with descriptions + education
+   "Medium" = candidate is missing one major section (e.g. no experience descriptions, or no education)
+   "Low"    = sparse profile — fewer than 3 skills, no experience detail, or mostly blank fields.
+              When Low: automatically add a gap: {"description": "Sparse profile — scores are estimates only and candidate needs manual review", "type": "nice-to-have"}
+
+7. Scoring discipline for incomplete profiles:
+   - If a dimension has NO data (e.g. education section is entirely blank), score that dimension 0.
+   - Do not award points for information not present in the profile.
+   - A candidate with no education data gets education_score: 0 (unless job spec explicitly says education is not required).
+   - Do not use average scores as a fallback. Absence of data = 0 for that dimension.
+
+8. bias_flags: flag ANY scoring influence from non-merit factors (gender-coded language, career gaps,
+   institution prestige, non-English background, nationality, age signals). Empty array if none.
+
+9. recommendation thresholds:
+   "Strong Yes" = match_score >= 82 AND no dealbreaker gaps AND confidence is High or Medium
+   "Yes"        = match_score >= 68 AND no dealbreaker gaps
+   "Maybe"      = match_score >= 50 OR recoverable gaps OR confidence is Low (needs human review)
+   "No"         = match_score < 50 OR has dealbreaker gaps
+
 
 JSON STRUCTURE:
-[{"applicant_id":"string","applicant_name":"string","rank":1,"match_score":0,"skills_score":0,"experience_score":0,"education_score":0,"relevance_score":0,"confidence_level":"High","recommendation":"Yes","strengths":[],"gaps":[{"description":"string","type":"nice-to-have"}],"bias_flags":[]}]
+[{"applicant_id":"string","applicant_name":"string","rank":1,"match_score":0,"skills_score":0,"experience_score":0,"education_score":0,"relevance_score":0,"confidence_level":"High","recommendation":"Yes","strengths":["specific strength"],"gaps":[{"description":"specific gap","type":"nice-to-have"}],"bias_flags":[]}]
 
-CANDIDATES:
+═══════════════════════════════════════
+CANDIDATES TO EVALUATE
+═══════════════════════════════════════
 ${candidateSummaries}
 `.trim();
 
