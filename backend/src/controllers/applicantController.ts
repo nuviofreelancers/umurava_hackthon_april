@@ -97,10 +97,11 @@ export async function createApplicant(req: AuthRequest, res: Response, next: Nex
 // POST /api/applicants/bulk
 export async function bulkCreateApplicants(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { applicants: raw, job_id, sourceType } = req.body as {
+    const { applicants: raw, job_id, sourceType, source } = req.body as {
       applicants: Array<Record<string, unknown>>;
       job_id?: string;
       sourceType?: string;
+      source?: string;
     };
 
     if (!Array.isArray(raw) || raw.length === 0) {
@@ -142,6 +143,7 @@ export async function bulkCreateApplicants(req: AuthRequest, res: Response, next
         userId: req.user!.id,
         ...(effectiveJobId ? { jobId: effectiveJobId } : {}),
         sourceType: sourceType ?? "manual",
+        source: source ?? a.source,
       }));
 
     const skipped = raw.length - toInsert.length;

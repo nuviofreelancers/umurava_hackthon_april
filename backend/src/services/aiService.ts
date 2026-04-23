@@ -8,7 +8,15 @@ const MAX_RETRIES = 4;
 // Delays between retries — long enough for Gemini overloads to clear
 const RETRY_DELAYS_MS = [3000, 8000, 15000, 25000];
 
-// ─── Gemini API caller with correct retry logic ────────────────────────────────
+// ─── UTILS ────────────────────────────────────────────────────────────────────
+
+/** * Robust JSON extraction.*/
+function extractJSON(text: string): string {
+  const match = text.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
+  return match ? match[0].trim() : text.trim();
+}
+
+// ─── Gemini API caller ────────────────────────────────────────────────────────
 
 async function callGemini(prompt: string): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -17,7 +25,6 @@ async function callGemini(prompt: string): Promise<string> {
   let lastError: Error = new Error("Gemini call failed after all retries");
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    // Wait before retries (not before first attempt)
     if (attempt > 0) {
       const delay = RETRY_DELAYS_MS[attempt - 1] ?? 30000;
       logger.warn(`Gemini retry ${attempt}/${MAX_RETRIES} — waiting ${delay}ms before next attempt`);
@@ -47,38 +54,22 @@ async function callGemini(prompt: string): Promise<string> {
         }
       );
     } catch (networkErr) {
-      // Network-level failure (DNS, timeout, connection reset)
       lastError = networkErr instanceof Error ? networkErr : new Error(String(networkErr));
       logger.warn(`Gemini network error on attempt ${attempt + 1}: ${lastError.message}`);
       continue;
     }
 
-    // Retryable: service overloaded or rate limited
     if (res.status === 503 || res.status === 429) {
-      const retryAfterHeader = res.headers.get("Retry-After");
       lastError = new Error(`Gemini ${res.status} — service overloaded`);
-      logger.warn(`Gemini returned ${res.status} on attempt ${attempt + 1}/${MAX_RETRIES + 1}${retryAfterHeader ? ` (Retry-After: ${retryAfterHeader}s)` : ""}`);
-      // Honour server-sent Retry-After if present and larger than our delay
-      if (retryAfterHeader && attempt < MAX_RETRIES) {
-        const serverDelay = parseInt(retryAfterHeader, 10) * 1000;
-        const ourDelay = RETRY_DELAYS_MS[attempt] ?? 30000;
-        if (serverDelay > ourDelay) {
-          await new Promise((r) => setTimeout(r, serverDelay));
-          // Skip the normal delay at the top of the loop
-          attempt++; // manually bump so the loop's wait is skipped on next iteration
-          if (attempt > MAX_RETRIES) break;
-        }
-      }
+      logger.warn(`Gemini returned ${res.status} on attempt ${attempt + 1}/${MAX_RETRIES + 1}`);
       continue;
     }
 
-    // Non-retryable HTTP error
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       throw new Error(`Gemini API error ${res.status}: ${body}`);
     }
 
-    // Parse successful response
     const data = await res.json() as {
       candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>;
     };
@@ -92,11 +83,6 @@ async function callGemini(prompt: string): Promise<string> {
 
   logger.error(`Gemini failed after ${MAX_RETRIES + 1} attempts: ${lastError.message}`);
   throw lastError;
-}
-
-/** Strip markdown code fences that Gemini sometimes wraps around JSON */
-function stripCodeFences(text: string): string {
-  return text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
 }
 
 // ─── CV EXTRACTION ─────────────────────────────────────────────────────────────
@@ -124,7 +110,7 @@ export interface ExtractedCV {
     description?: string;
     technologies?: string[];
     isCurrent?: boolean;
-  }>;
+   }>;
   education?: Array<{
     institution: string;
     degree: string;
@@ -158,125 +144,21 @@ STEP 1 — IS THIS ACTUALLY A RESUME?
 Before doing anything, ask: does this text clearly belong to a specific person and describe their professional history?
 Signs it is NOT a resume: it's a webpage with navigation links, a news article, a job description, a LinkedIn feed, random scraped text, or a document with no personal info.
 If it is NOT a resume → output exactly this and nothing else: {"error":"not_a_resume"}
-If you are unsure → output {"error":"not_a_resume"} anyway. It is better to reject than to hallucinate.
 
-STEP 2 — HARD RULES (these override everything else):
+STEP 2 — HARD RULES:
 R1. Output ONLY raw JSON. No markdown, no backticks, no prose, no explanations.
-R2. OMIT any field you do not have real data for. Never use null, "", "N/A", "Unknown", "Not specified", or placeholder text.
+R2. OMIT any field you do not have real data for. Never use null, "", "N/A", or "Unknown".
 R3. Never invent, assume, or infer anything not explicitly written in the text.
-R4. If a section exists but is illegible, garbled, or too short to parse, omit that whole section.
-
-STEP 3 — FIELD-BY-FIELD RULES:
-
-NAME
-- Extract first_name, last_name, and full_name separately.
-- If you cannot find a clear human name, omit all three and return {"error":"not_a_resume"}.
-
-EMAIL / PHONE
-- Extract exactly as written. Email → lowercase. Phone → keep country code if present.
-- If absent, omit entirely.
-
-LOCATION
-- Format: "City, Country". If only a city is present, use just "City".
-- If absent or ambiguous, omit.
-
-HEADLINE
-- Only include if you have at least a role AND one skill to work with.
-- Format: "[Seniority] [Role] specializing in [Skill1] and [Skill2]"
-- If the profile is too sparse to write a meaningful headline, omit it.
-
-BIO
-- Only write a bio if you have at least 3 distinct facts about the person (role, skills, experience length, or education).
-- Write exactly 2 factual sentences. No opinions, no filler ("passionate", "dynamic", "results-driven").
-- If fewer than 3 facts are available, omit bio entirely.
-
-EXPERIENCE_YEARS
-- Calculate by summing non-overlapping date ranges from the experience array.
-- Round to nearest 0.5.
-- If NO dates exist anywhere in the resume, omit experience_years entirely. Do NOT guess.
-
-SKILLS
-- Extract only skills explicitly named in the text (tools, languages, frameworks, methodologies).
-- Do NOT infer skills from job titles or company names alone.
-- Level inference (use the LOWEST level that fits the evidence):
-    "Expert"       → explicitly called expert/lead/architect OR 5+ years stated for that specific skill
-    "Advanced"     → 3-5 years stated, or senior-level role context clearly tied to that skill
-    "Intermediate" → 1-3 years stated, or clearly used regularly in a described role
-    "Beginner"     → explicitly described as learning, trainee, exposure, or < 1 year
-    OMIT level field entirely → if there is zero evidence of proficiency level. Do not default to Intermediate.
-- yearsOfExperience: only include if a number is explicitly stated for that specific skill. Omit otherwise.
-
-EXPERIENCE (work history entries)
-- Only include entries that have at minimum a company name OR a role title.
-- startDate / endDate: format "YYYY-MM". Use "Present" for current. If a date is missing for an entry, omit that date field entirely — do not guess.
-- description: only include if there is actual descriptive text in the resume. Do not summarise the job title as a description.
-- technologies: only list items explicitly mentioned in that specific job entry.
-
-EDUCATION
-- Only include entries with at minimum an institution name OR a degree name.
-- Degree level mapping: PhD/Doctorate→"PhD" | Master/MSc/MBA/MEng→"Master" | Bachelor/BSc/BA/BEng/BE→"Bachelor" | Associate→"Associate" | Diploma/HND/Secondary/High School→"High School"
-- startYear / endYear: only include if explicitly stated as a year number. Never infer.
-
-CERTIFICATIONS / PROJECTS
-- Only include if explicitly named in the text. Do not infer from skills or experience descriptions.
-
-SOCIAL LINKS
-- Only include URLs that literally appear in the text. Never construct or guess URLs from a person's name.
-
-AVAILABILITY
-- Default to { "status": "Available", "type": "Full-time" } ONLY if no contradicting information exists.
-- If the text says "not looking", "currently employed and not seeking", or similar → use "Not Available".
-
-STEP 4 — OUTPUT STRUCTURE (omit any key with no real data):
-{
-  "first_name": "string",
-  "last_name": "string",
-  "full_name": "string",
-  "email": "string",
-  "phone": "string",
-  "headline": "string",
-  "bio": "string",
-  "location": "string",
-  "current_role": "string",
-  "current_company": "string",
-  "experience_years": 0,
-  "education_level": "Bachelor",
-  "education_field": "string",
-  "skills": [{ "name": "string", "level": "Intermediate", "yearsOfExperience": 0 }],
-  "languages": [{ "name": "string", "proficiency": "Fluent" }],
-  "experience": [{
-    "company": "string",
-    "role": "string",
-    "startDate": "YYYY-MM",
-    "endDate": "YYYY-MM or Present",
-    "description": "string",
-    "technologies": ["string"],
-    "isCurrent": false
-  }],
-  "education": [{
-    "institution": "string",
-    "degree": "string",
-    "fieldOfStudy": "string",
-    "startYear": 0,
-    "endYear": 0
-  }],
-  "certifications": [{ "name": "string", "issuer": "string", "issueDate": "YYYY-MM" }],
-  "projects": [{ "name": "string", "description": "string", "technologies": ["string"], "role": "string", "link": "string" }],
-  "availability": { "status": "Available", "type": "Full-time" },
-  "socialLinks": { "linkedin": "string", "github": "string", "portfolio": "string", "website": "string" },
-  "portfolio_url": "string"
-}
 
 RESUME TEXT:
-
 ${text.slice(0, 12000)}
 `.trim();
 
   const raw = await callGemini(prompt);
-  const clean = stripCodeFences(raw);
+  const clean = extractJSON(raw);
   try {
     return JSON.parse(clean) as ExtractedCV;
-  } catch {
+  } catch (err) {
     logger.error("Failed to parse extractCV response as JSON:", clean.slice(0, 500));
     throw new Error("AI returned malformed JSON during CV extraction");
   }
@@ -313,17 +195,7 @@ export async function screenAI(
     required_skills: string[]; preferred_skills: string[];
     experience_level: string; employment_type: string; department: string;
   },
-  applicants: Array<{
-    _id: string; full_name: string; headline?: string;
-    skills?: Array<{ name: string; level?: string; yearsOfExperience?: number } | string>;
-    experience?: Array<{ company: string; role: string; startDate?: string; endDate?: string; description?: string; technologies?: string[] }>;
-    education?: Array<{ institution: string; degree: string; fieldOfStudy?: string; endYear?: number }>;
-    experience_years?: number; education_level?: string;
-    certifications?: Array<{ name: string; issuer?: string }>;
-    projects?: Array<{ name: string; description?: string; technologies?: string[] }>;
-    languages?: Array<{ name: string; proficiency?: string }>;
-    location?: string; availability?: { status?: string; type?: string };
-  }>,
+  applicants: Array<any>,
   weights: ScreeningWeights,
   shortlistSize?: number
 ): Promise<ScreeningResultAI[]> {
@@ -337,38 +209,75 @@ export async function screenAI(
     relevance:  Math.round((weights.relevance / total) * 100),
   };
 
-  const candidateSummaries = applicants.map((a) => {
-    const skillNames = (a.skills ?? [])
-      .map((s) => typeof s === "string" ? s : `${s.name}${s.level ? ` (${s.level})` : ""}${s.yearsOfExperience ? ` ${s.yearsOfExperience}yr` : ""}`)
-      .join(", ");
-    const expSummary = (a.experience ?? []).slice(0, 5)
-      .map((e) => `${e.role} @ ${e.company} [${e.startDate ?? "?"}–${e.endDate ?? "Present"}]${e.technologies?.length ? ` | Tech: ${e.technologies.slice(0, 5).join(", ")}` : ""}${e.description ? ` | ${e.description.slice(0, 120)}` : ""}`)
-      .join("\n  ");
-    const eduSummary = (a.education ?? [])
-      .map((e) => `${e.degree}${e.fieldOfStudy ? ` in ${e.fieldOfStudy}` : ""} @ ${e.institution}${e.endYear ? ` (${e.endYear})` : ""}`)
-      .join("; ");
-    const certSummary = (a.certifications ?? []).map((c) => c.name).join(", ");
-    const projSummary = (a.projects ?? []).slice(0, 3)
-      .map((p) => `${p.name}${p.technologies?.length ? ` [${p.technologies.slice(0, 4).join(", ")}]` : ""}${p.description ? `: ${p.description.slice(0, 80)}` : ""}`)
-      .join(" | ");
-    const langSummary = (a.languages ?? []).map((l) => `${l.name} (${l.proficiency})`).join(", ");
+  const limitInstruction = shortlistSize 
+    ? `IMPORTANT: Evaluate all candidates, but ONLY return the top ${shortlistSize} best-matching candidates in your final JSON results array.`
+    : "Evaluate and return results for every candidate provided.";
 
-    return `CANDIDATE_ID: ${a._id}
-Name: ${a.full_name} | Headline: ${a.headline ?? "—"}
-Location: ${a.location ?? "—"} | Availability: ${a.availability?.status ?? "Unknown"} ${a.availability?.type ?? ""}
-Experience: ${a.experience_years ?? "?"} yrs total | Education: ${a.education_level ?? "—"}
-Skills: ${skillNames || "—"}
-Work History:
-  ${expSummary || "—"}
-Education: ${eduSummary || "—"}
-Certifications: ${certSummary || "—"}
-Projects: ${projSummary || "—"}
-Languages: ${langSummary || "—"}`;
-  }).join("\n\n---\n\n");
+  const candidateSummaries = applicants.map((a) => {
+  const skillNames = (a.skills ?? [])
+    .map((s: any) =>
+      typeof s === "string"
+        ? s
+        : `${s.name}${s.level ? ` (${s.level})` : ""}${s.yearsOfExperience ? ` ${s.yearsOfExperience}yr` : ""}`
+    )
+    .join(", ");
+
+  const expSummary = (a.experience ?? [])
+    .slice(0, 5)
+    .map((e: any) =>
+      `${e.role} @ ${e.company} [${e.startDate ?? "?"}–${e.endDate ?? "Present"}]${
+        e.technologies?.length
+          ? ` | Tech: ${e.technologies.slice(0, 5).join(", ")}`
+          : ""
+      }${e.description ? ` | ${e.description.slice(0, 120)}` : ""}`
+    )
+    .join("\n      ");
+
+  const eduSummary = (a.education ?? [])
+    .map((e: any) =>
+      `${e.degree}${e.fieldOfStudy ? ` in ${e.fieldOfStudy}` : ""} @ ${e.institution}${
+        e.endYear ? ` (${e.endYear})` : ""
+      }`
+    )
+    .join("; ");
+
+  const certSummary = (a.certifications ?? [])
+    .map((c: any) => c.name)
+    .join(", ");
+
+  const projSummary = (a.projects ?? [])
+    .slice(0, 3)
+    .map((p: any) =>
+      `${p.name}${
+        p.technologies?.length
+          ? ` [${p.technologies.slice(0, 4).join(", ")}]`
+          : ""
+      }${p.description ? `: ${p.description.slice(0, 80)}` : ""}`
+    )
+    .join(" | ");
+
+  const langSummary = (a.languages ?? [])
+    .map((l: any) => `${l.name} (${l.proficiency})`)
+    .join(", ");
+
+  return `CANDIDATE_ID: ${a._id}
+      Name: ${a.full_name} | Headline: ${a.headline ?? "—"}
+      Location: ${a.location ?? "—"} | Availability: ${a.availability?.status ?? "Unknown"} ${a.availability?.type ?? ""}
+      Experience: ${a.experience_years ?? "?"} yrs total | Education: ${a.education_level ?? "—"}
+      Skills: ${skillNames || "—"}
+      Work History:
+        ${expSummary || "—"}
+      Education: ${eduSummary || "—"}
+      Certifications: ${certSummary || "—"}
+      Projects: ${projSummary || "—"}
+      Languages: ${langSummary || "—"}`;
+}).join("\n\n---\n\n");
 
   const prompt = `
 You are TalentScreen's AI talent evaluator — an objective, evidence-based recruiter with no biases.
 Your task: evaluate ${applicants.length} candidate(s) against the job spec below and produce ranked screening results.
+
+${limitInstruction}
 
 ═══════════════════════════════════════
 JOB SPECIFICATION
@@ -420,48 +329,27 @@ RELEVANCE (${w.relevance}% weight):
 ═══════════════════════════════════════
 OUTPUT RULES
 ═══════════════════════════════════════
-1. Return ONLY a raw JSON array. No markdown, no preamble, no code fences.
-2. applicant_id MUST exactly match the CANDIDATE_ID shown for each candidate. Do not alter it.
-3. Rank starts at 1 (best match). Every candidate appears exactly once.
+1. Return a JSON object with key "results" containing the ranked array.
+2. applicant_id MUST exactly match the CANDIDATE_ID shown for each candidate.
+3. Rank starts at 1 (best match).
 
 4. strengths — strict rules:
    - Only write strengths directly evidenced by data in the candidate's profile above.
    - Name the specific skill, role, company, project, or achievement you are referencing.
-   - If a candidate has a sparse profile (few skills, no experience detail, no projects), write FEWER strengths — 1 is acceptable.
-   - NEVER write: "good communicator", "team player", "fast learner", "passionate", or any trait not supported by data.
-   - If you cannot find any genuine strength relevant to this job: ["Insufficient profile data to assess strengths"]
+   - NEVER write generic fluff like "good communicator" or "passionate".
 
 5. gaps — strict rules:
-   - Be specific. "Missing Python experience" is acceptable. "Lacks technical skills" is not.
-   - If a required skill from the job spec is absent from the candidate's profile, it is a gap — name the skill.
-   - If experience_years is significantly below the job level, note it with the actual numbers.
-   - type "dealbreaker" = missing something the job explicitly requires and cannot be taught quickly.
-   - type "nice-to-have" = missing a preferred skill or minor misalignment.
+   - Be specific. Note missing required skills or experience gaps.
+   - type "dealbreaker" = missing something the job explicitly requires.
+   - type "nice-to-have" = missing a preferred skill.
 
-6. confidence_level — reflects data quality, not match quality:
-   "High"   = candidate has a skills list + at least 2 experience entries with descriptions + education
-   "Medium" = candidate is missing one major section (e.g. no experience descriptions, or no education)
-   "Low"    = sparse profile — fewer than 3 skills, no experience detail, or mostly blank fields.
-              When Low: automatically add a gap: {"description": "Sparse profile — scores are estimates only and candidate needs manual review", "type": "nice-to-have"}
+6. confidence_level — reflects data quality:
+   "High"   = Complete profile (skills + detailed experience + education).
+   "Medium" = Missing one major section.
+   "Low"    = Sparse profile (fewer than 3 skills, no experience detail).
 
-7. Scoring discipline for incomplete profiles:
-   - If a dimension has NO data (e.g. education section is entirely blank), score that dimension 0.
-   - Do not award points for information not present in the profile.
-   - A candidate with no education data gets education_score: 0 (unless job spec explicitly says education is not required).
-   - Do not use average scores as a fallback. Absence of data = 0 for that dimension.
-
-8. bias_flags: flag ANY scoring influence from non-merit factors (gender-coded language, career gaps,
-   institution prestige, non-English background, nationality, age signals). Empty array if none.
-
-9. recommendation thresholds:
-   "Strong Yes" = match_score >= 82 AND no dealbreaker gaps AND confidence is High or Medium
-   "Yes"        = match_score >= 68 AND no dealbreaker gaps
-   "Maybe"      = match_score >= 50 OR recoverable gaps OR confidence is Low (needs human review)
-   "No"         = match_score < 50 OR has dealbreaker gaps
-
-
-JSON STRUCTURE:
-[{"applicant_id":"string","applicant_name":"string","rank":1,"match_score":0,"skills_score":0,"experience_score":0,"education_score":0,"relevance_score":0,"confidence_level":"High","recommendation":"Yes","strengths":["specific strength"],"gaps":[{"description":"specific gap","type":"nice-to-have"}],"bias_flags":[]}]
+REQUIRED JSON FORMAT:
+{"results": [{"applicant_id":"string","applicant_name":"string","rank":1,"match_score":0,"skills_score":0,"experience_score":0,"education_score":0,"relevance_score":0,"confidence_level":"High","recommendation":"Yes","strengths":["specific strength"],"gaps":[{"description":"specific gap","type":"nice-to-have"}],"bias_flags":[]}]}
 
 ═══════════════════════════════════════
 CANDIDATES TO EVALUATE
@@ -470,13 +358,17 @@ ${candidateSummaries}
 `.trim();
 
   const raw = await callGemini(prompt);
-  const clean = stripCodeFences(raw);
+  const clean = extractJSON(raw);
   try {
-    const parsed = JSON.parse(clean) as ScreeningResultAI[];
-    if (!Array.isArray(parsed)) throw new Error("Gemini screening response is not an array");
-    return parsed;
-  } catch {
-    logger.error("Failed to parse screenAI response as JSON:", clean.slice(0, 500));
+    const parsed = JSON.parse(clean);
+    const results = Array.isArray(parsed) ? parsed : (parsed.results || []);
+
+    if (!Array.isArray(results)) throw new Error("Response is not an array");
+
+    const finalResults = shortlistSize ? results.slice(0, shortlistSize) : results;
+    return finalResults as ScreeningResultAI[];
+  } catch (err) {
+    logger.error("Failed to parse screenAI response:", clean.slice(0, 500));
     throw new Error("AI returned malformed JSON during screening");
   }
 }

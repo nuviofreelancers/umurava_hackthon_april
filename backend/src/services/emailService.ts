@@ -20,6 +20,8 @@ interface InterviewEmailPayload {
   interviewDate: Date;
   platform: string;
   link?: string;
+  location?: string;
+  notes?: string;
 }
 
 export async function sendInterviewEmail(payload: InterviewEmailPayload): Promise<void> {
@@ -45,7 +47,9 @@ export async function sendInterviewEmail(payload: InterviewEmailPayload): Promis
       <table>
         <tr><td><strong>Date & Time:</strong></td><td>${dateStr}</td></tr>
         <tr><td><strong>Platform:</strong></td><td>${payload.platform}</td></tr>
-        ${payload.link ? `<tr><td><strong>Link:</strong></td><td><a href="${payload.link}">${payload.link}</a></td></tr>` : ""}
+        ${payload.link     ? `<tr><td><strong>Meeting Link:</strong></td><td><a href="${payload.link}">${payload.link}</a></td></tr>` : ""}
+        ${payload.location ? `<tr><td><strong>Location:</strong></td><td>${payload.location}</td></tr>` : ""}
+        ${payload.notes    ? `<tr><td><strong>Notes:</strong></td><td>${payload.notes}</td></tr>` : ""}
       </table>
       <p>Please confirm your attendance by replying to this email.</p>
       <p>Best regards,<br/>TalentScreen HR Team</p>

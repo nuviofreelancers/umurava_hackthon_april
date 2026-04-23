@@ -13,6 +13,7 @@ import applicantRoutes  from "./routes/applicantRoutes";
 import uploadRoutes     from "./routes/uploadRoutes";
 import { screenRouter, resultsRouter } from "./routes/screeningRoutes";
 import { notFound, errorHandler } from "./middlewares/errorHandler";
+import interviewNotifyRouter from "./routes/interviewNotify.route";
 
 // ─── Validate required environment variables ──────────────────────────────────
 const REQUIRED_ENV = ["MONGODB_URI", "JWT_SECRET", "GEMINI_API_KEY"] as const;
@@ -72,7 +73,7 @@ app.use("/api/applicants", applicantRoutes);
 app.use("/api/upload",     uploadRoutes);
 app.use("/api/screen",     screenRouter);
 app.use("/api/results",    resultsRouter);
-
+app.use("/api/interviews", interviewNotifyRouter);
 // ─── Error handling ───────────────────────────────────────────────────────────
 app.use(notFound);
 app.use(errorHandler);

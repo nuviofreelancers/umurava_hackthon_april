@@ -63,10 +63,10 @@ export const applicants = {
     request<unknown[]>(`/applicants?job_id=${jobId}&page=${page}&limit=${limit}`),
   get:    (id: string)            => request<unknown>(`/applicants/${id}`),
   create: (data: unknown)         => request<unknown>("/applicants", { method: "POST", body: JSON.stringify(data) }),
-  bulkCreate: (data: unknown[], jobId?: string, sourceType?: string) =>
+  bulkCreate: (data: unknown[], jobId?: string, sourceType?: string, source?: string) =>
     request<unknown>("/applicants/bulk", {
       method: "POST",
-      body: JSON.stringify({ applicants: data, job_id: jobId, sourceType }),
+      body: JSON.stringify({ applicants: data, job_id: jobId, sourceType, source }),
     }),
   update:  (id: string, data: unknown) => request<unknown>(`/applicants/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   delete:  (id: string)                => request<unknown>(`/applicants/${id}`, { method: "DELETE" }),
@@ -90,6 +90,20 @@ export const screening = {
       method: "POST",
       body: JSON.stringify({ job_id: jobId, weights, shortlistSize }),
     }),
+};
+
+// ─── Interviews ───────────────────────────────────────────────────────────────
+export const interviews = {
+  schedule: (applicantId: string, data: {
+    interview_date: string;
+    interview_platform?: string;
+    interview_link?: string;
+    interview_location?: string;
+    interview_notes?: string;
+    job_title?: string;
+  }) => request<unknown>(`/applicants/${applicantId}/interview`, { method: "PUT", body: JSON.stringify(data) }),
+  cancel: (applicantId: string) =>
+    request<unknown>(`/applicants/${applicantId}/interview/cancel`, { method: "PUT" }),
 };
 
 // ─── File Upload ──────────────────────────────────────────────────────────────

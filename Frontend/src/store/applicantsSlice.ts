@@ -71,7 +71,6 @@ const applicantsSlice = createSlice({
       .addCase(fetchApplicants.fulfilled,      (state, action) => {
         state.loading = false;
         const { list, total, page, totalPages, hasMore } = extractList(action.payload);
-        // FIX: if loading page > 1 (Load More), append; otherwise replace
         if (page > 1) {
           state.list = [...(state.list as unknown[]), ...list];
         } else {
@@ -103,17 +102,20 @@ const applicantsSlice = createSlice({
         state.total += 1;
       })
 
-      // FIX: bulkCreate response now has { inserted, duplicateWarnings, crossJobMatches }
       .addCase(bulkCreateApplicants.fulfilled, (state, action) => {
         const payload = action.payload as any;
         const inserted: unknown[] = Array.isArray(payload)
           ? payload
           : (Array.isArray(payload?.inserted) ? payload.inserted : []);
-        // FIX: normalize _id → id so frontend ID lookups work on freshly inserted docs
+
+        const sourceType = action.meta.arg.sourceType;
+
         const normalized = inserted.map((a: any) => ({
           ...a,
           id: a.id || a._id?.toString(),
+          source: a.source || a.sourceType || sourceType || "manual",
         }));
+
         state.list = [...normalized, ...(state.list as unknown[])];
         state.total += normalized.length;
       })

@@ -313,13 +313,14 @@ export default function CandidateCsvPreview() {
       // Check both key names — jobId is set by ApplicantUpload, job_id may exist in older data
       const jobId      = (toImport[0] as any).jobId || (toImport[0] as any).job_id;
       const sourceType = (toImport[0] as any).sourceType || "csv";
+      const source     = (toImport[0] as any).source || ""; 
       const docs = toImport.map(c => {
-        const { job_id: _jid, jobId: _ji, sourceType: _st, _nonStandard: _ns, _missingFields: _mf, _missingRecommended: _mr, ...rest } = c as any;
+        const { job_id: _jid, jobId: _ji, sourceType: _st, source: _src, _nonStandard: _ns, _missingFields: _mf, _missingRecommended: _mr, ...rest } = c as any;
         // Pass jobId explicitly on each doc so bulkCreate stores it correctly
         return { ...rest, jobId: jobId || undefined, profile_completeness: calculateCompleteness(c) };
       });
 
-      const response = await applicantsApi.bulkCreate(docs, jobId, sourceType) as any;
+      const response = await applicantsApi.bulkCreate(docs, jobId, sourceType, source) as any;
 
       // FIX: surface duplicate/cross-job warnings from backend
       const dupWarnings: string[] = response?.duplicateWarnings || [];

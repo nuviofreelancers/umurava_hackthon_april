@@ -56,43 +56,57 @@ export default function ScheduleInterviewModal({ applicant, jobTitle, onClose, o
         interview_reminder_at: reminderDateTime.toISOString(),
       });
 
-      // Request backend to send confirmation email + schedule 24h reminder
-      // Silently ignores failure if endpoint not yet implemented
+      // Send confirmation email + schedule 24h reminder via the notify endpoint.
+      // We surface a warning toast on failure, but do NOT block the success flow
+      // since the interview record is already saved.
       try {
         const token = localStorage.getItem("hr_token");
-        await fetch("/api/interviews/notify", {
+        const notifyRes = await fetch("/api/interviews/notify", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
           body: JSON.stringify({
-            applicant_id: applicant.id,
-            applicant_name: applicant.full_name,
-            applicant_email: applicant.email,
-            job_title: jobTitle,
-            interview_type: interviewType,
-            interview_date: form.interview_date,
-            interview_time: form.interview_time,
-            interview_link: form.interview_link,
+            applicant_id:       applicant.id,
+            applicant_name:     applicant.full_name,
+            applicant_email:    applicant.email,
+            job_title:          jobTitle,
+            interview_type:     interviewType,           // "online" | "offline"
+            interview_date:     form.interview_date,     // "YYYY-MM-DD"
+            interview_time:     form.interview_time,     // "HH:MM"
+            interview_link:     form.interview_link,
             interview_location: form.interview_location,
-            interview_notes: form.interview_notes,
-            reminder_at: reminderDateTime.toISOString(),
+            interview_notes:    form.interview_notes,
+            reminder_at:        reminderDateTime.toISOString(),
           }),
         });
-      } catch {
-        // Email endpoint may not be wired yet — interview record is still saved
+
+        if (!notifyRes.ok) {
+          throw new Error(`notify endpoint returned ${notifyRes.status}`);
+        }
+      } catch (emailErr) {
+        // Interview is saved — just warn that email failed
+        console.warn("Interview notification email failed:", emailErr);
+        toast({
+          title: "Interview scheduled — email not sent",
+          description: "The interview was saved but the confirmation email could not be delivered.",
+          variant: "destructive",
+        });
+        onScheduled?.();
+        return;
       }
 
       toast({
         title: "Interview scheduled",
-        description: `${applicant.full_name} — ${form.interview_date} at ${form.interview_time}. Confirmation email queued.`,
+        description: `${applicant.full_name} — ${form.interview_date} at ${form.interview_time}. Confirmation email sent.`,
       });
       onScheduled?.();
     } catch {
       toast({ title: "Failed to schedule interview", variant: "destructive" });
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   return (
