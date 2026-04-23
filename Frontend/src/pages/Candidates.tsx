@@ -54,7 +54,7 @@ export default function Candidates() {
   const allSources = Array.from(new Set(
     applicants.map(a => (a as any).source || (a as any).sourceType || "manual").filter(Boolean)
   ));
-  const showSourceFilter = allSources.length > 1;
+  const showSourceFilter = allSources.length > 0; // Always show when there are candidates
 
   const filtered = applicants.filter(a => {
     const q = search.toLowerCase();

@@ -1,8 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { uploads, applicants as applicantsApi } from "@/api/backend";
-import { useDispatch } from "react-redux";
-import { bulkCreateApplicants } from "@/store/applicantsSlice";
+import { uploads } from "@/api/backend";
 import { Upload, FileJson, FileText, Link as LinkIcon, Image, Tag, CheckCircle2 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -90,7 +88,6 @@ function SaveResult({ count, onDone }) {
 export default function ApplicantUpload({ jobId, onUploaded }) {
   const navigate  = useNavigate();
   const { toast } = useToast();
-  const dispatch  = useDispatch<any>();
 
   const [uploading, setUploading]             = useState(false);
   const [cvUrl, setCvUrl]                     = useState("");
@@ -184,17 +181,11 @@ export default function ApplicantUpload({ jobId, onUploaded }) {
       toast({ title: `${failures} file(s) could not be parsed`, description: "Continuing with the ones that succeeded.", duration: 3000 });
     }
 
+    // Always route through preview page so user can review parsed data before importing
     if (allCandidates.length > 0) {
-      try {
-        await dispatch(bulkCreateApplicants({ data: allCandidates, jobId, sourceType: allCandidates[0]?.sourceType || "pdf" })).unwrap();
-        toast({ title: `${allCandidates.length} candidate${allCandidates.length > 1 ? "s" : ""} added` });
-        onUploaded?.();
-      } catch (err: any) {
-        // Fallback: show in preview if direct save fails
-        sessionStorage.setItem("csv_candidates_preview", JSON.stringify(allCandidates));
-        sessionStorage.setItem("csv_candidates_job_id", jobId || "");
-        navigate("/candidates/csv-preview");
-      }
+      sessionStorage.setItem("csv_candidates_preview", JSON.stringify(allCandidates));
+      sessionStorage.setItem("csv_candidates_job_id", jobId || "");
+      navigate("/candidates/csv-preview");
     }
   };
 
@@ -220,10 +211,11 @@ export default function ApplicantUpload({ jobId, onUploaded }) {
 
       
       const tagged = result.candidates.map(c => tagCandidate(c, jobId, "url", "Link / URL"));
-      await dispatch(bulkCreateApplicants({ data: tagged, jobId, sourceType: "url" })).unwrap();
-      toast({ title: "Candidate added from URL" });
+      // Route through preview so user can verify parsed data before saving
+      sessionStorage.setItem("csv_candidates_preview", JSON.stringify(tagged));
+      sessionStorage.setItem("csv_candidates_job_id", jobId || "");
       setCvUrl("");
-      onUploaded?.();
+      navigate("/candidates/csv-preview");
     } catch (err: any) {
       toast({ title: "URL parsing failed", description: err.message, variant: "destructive", duration: 3000 });
     }

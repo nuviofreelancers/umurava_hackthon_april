@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { applicants as applicantsApi } from "@/api/backend";
+import { useDispatch } from "react-redux";
+import { createApplicant } from "@/store/applicantsSlice";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,6 +13,7 @@ const SKILL_LEVELS = ["Beginner", "Intermediate", "Advanced", "Expert"];
 
 export default function AddCandidateModal({ jobs, onClose, onAdded }) {
   const { toast } = useToast();
+  const dispatch  = useDispatch<any>();
   const [saving, setSaving]         = useState(false);
   const [uploadMode, setUploadMode] = useState(false);
   const [skillInput, setSkillInput] = useState({ name: "", level: "Intermediate" });
@@ -50,14 +52,12 @@ export default function AddCandidateModal({ jobs, onClose, onAdded }) {
       const coreFields = ["full_name", "email", "skills", "experience_years", "education_level", "current_role"];
       const filled = coreFields.filter(f => { const v = form[f]; return v && (Array.isArray(v) ? v.length > 0 : true); });
 
-      await applicantsApi.create({
+      await dispatch(createApplicant({
         ...form,
-        // FIX: send jobId explicitly (camelCase) so the backend createApplicant
-        // handler always finds it — it also reads job_id as fallback
         jobId: form.job_id,
         source: "Manual Entry",
         profile_completeness: Math.round((filled.length / coreFields.length) * 100),
-      });
+      })).unwrap();
       toast({ title: "Candidate added" });
       onAdded?.();
       onClose();
