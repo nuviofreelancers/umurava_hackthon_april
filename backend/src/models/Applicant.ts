@@ -115,20 +115,20 @@ export interface IApplicant extends Document {
 // ─── Sub-schemas ──────────────────────────────────────────────────────────────
 
 const SkillSchema = new Schema<ISkill>({
-  name:              { type: String, required: true, trim: true },
+  name:              { type: String, trim: true, default: "" },
   level:             { type: String, enum: ["Beginner", "Intermediate", "Advanced", "Expert"], default: "Intermediate" },
   yearsOfExperience: { type: Number, min: 0 },
 }, { _id: false });
 
 const LanguageSchema = new Schema<ILanguage>({
-  name:        { type: String, required: true, trim: true },
+  name:        { type: String, trim: true, default: "" },
   proficiency: { type: String, enum: ["Basic", "Conversational", "Fluent", "Native"], default: "Conversational" },
 }, { _id: false });
 
 const ExperienceSchema = new Schema<IExperience>({
-  company:      { type: String, required: true, trim: true },
-  role:         { type: String, required: true, trim: true },
-  startDate:    { type: String, required: true },
+  company:      { type: String, trim: true, default: "" },
+  role:         { type: String, trim: true, default: "" },
+  startDate:    { type: String, default: "" },
   endDate:      { type: String, default: "Present" },
   description:  { type: String, trim: true },
   technologies: [{ type: String, trim: true }],
@@ -136,21 +136,21 @@ const ExperienceSchema = new Schema<IExperience>({
 }, { _id: false });
 
 const EducationSchema = new Schema<IEducation>({
-  institution: { type: String, required: true, trim: true },
-  degree:      { type: String, required: true, trim: true },
+  institution: { type: String, trim: true, default: "" },
+  degree:      { type: String, trim: true, default: "" },
   fieldOfStudy:{ type: String, trim: true },
   startYear:   { type: Number },
   endYear:     { type: Number },
 }, { _id: false });
 
 const CertificationSchema = new Schema<ICertification>({
-  name:      { type: String, required: true, trim: true },
+  name:      { type: String, trim: true, default: "" },
   issuer:    { type: String, trim: true },
   issueDate: { type: String },
 }, { _id: false });
 
 const ProjectSchema = new Schema<IProject>({
-  name:         { type: String, required: true, trim: true },
+  name:         { type: String, trim: true, default: "" },
   description:  { type: String, trim: true },
   technologies: [{ type: String, trim: true }],
   role:         { type: String, trim: true },

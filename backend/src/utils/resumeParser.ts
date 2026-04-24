@@ -528,7 +528,9 @@ function extractExperience(sections: Record<string, string[]>): ParsedCandidate[
   }
 
   if (current) entries.push(current);
-  return entries.slice(0, 8); // Cap at 8 entries
+  return entries
+    .filter(e => e.company || e.role)
+    .slice(0, 8); // Cap at 8 entries
 }
 
 function normalizeDate(raw: string): string {
@@ -596,7 +598,9 @@ function extractEducation(sections: Record<string, string[]>): ParsedCandidate["
   }
 
   if (current) entries.push(current);
-  return entries.slice(0, 5);
+  return entries
+    .filter(e => e.institution || e.degree)
+    .slice(0, 5);
 }
 
 function deriveEducationLevel(entries: ParsedCandidate["education"], fullText: string): { level: string; field: string } {
