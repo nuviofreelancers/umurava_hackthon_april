@@ -109,19 +109,30 @@ export interface ScreeningResultAI {
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 /**
- * Pulls the first top-level JSON object or array out of a string.
- * Handles cases where the model wraps output in prose or markdown fences.
+ * Pulls the top-level JSON object or array out of a string.
+ * Prefers objects over arrays (screenAI returns { "results": [...] }).
+ * Handles prose preambles and markdown fences from the model.
  */
 function extractJSON(text: string): string {
-  // Strip markdown fences first
-  const stripped = text.replace(/^```(?:json)?\s*/im, "").replace(/\s*```$/im, "").trim();
-  const match = stripped.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
-  return match ? match[0].trim() : stripped;
+  // Strip markdown fences (handles ```json ... ``` and ``` ... ```)
+  const stripped = text
+    .replace(/^```(?:json)?\s*/im, "")
+    .replace(/\s*```$/im, "")
+    .trim();
+
+  const objMatch = stripped.match(/\{[\s\S]*\}/);
+  const arrMatch = stripped.match(/\[[\s\S]*\]/);
+
+  if (objMatch && arrMatch) {
+    // Return whichever container starts earlier in the string (the outer one)
+    return (objMatch.index! <= arrMatch.index! ? objMatch[0] : arrMatch[0]).trim();
+  }
+  return (objMatch?.[0] ?? arrMatch?.[0] ?? stripped).trim();
 }
 
 // ─── Gemini API caller ────────────────────────────────────────────────────────
 
-async function callGemini(prompt: string): Promise<string> {
+async function callGemini(prompt: string, maxTokens = 8192): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not set in environment");
 
@@ -147,7 +158,8 @@ async function callGemini(prompt: string): Promise<string> {
               temperature: 0.1,
               topK: 40,
               topP: 0.95,
-              maxOutputTokens: 8192,
+              maxOutputTokens: maxTokens,
+              responseMimeType: "application/json",
             },
             safetySettings: [
               { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
@@ -695,7 +707,8 @@ CANDIDATES TO EVALUATE
 ${candidateSummaries}
 `.trim();
 
-  const raw = await callGemini(prompt);
+  // screenAI responses can be large (many candidates × detailed output) — use a higher token budget
+  const raw = await callGemini(prompt, 16384);
   const clean = extractJSON(raw);
   try {
     const parsed = JSON.parse(clean);
@@ -709,7 +722,8 @@ ${candidateSummaries}
     logger.info(`[Gemini] screenAI complete — evaluated ${applicants.length}, returning ${finalResults.length}`);
     return finalResults;
   } catch (err) {
-    logger.error("[Gemini] screenAI parse failed:", clean.slice(0, 500));
+    logger.error("[Gemini] screenAI parse failed (first 2000 chars):", clean.slice(0, 2000));
+    logger.error("[Gemini] screenAI parse failed (last 500 chars):", clean.slice(-500));
     throw new Error("AI returned malformed JSON during screening");
   }
 }
