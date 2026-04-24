@@ -80,6 +80,8 @@ graph TD
 - npm ≥ 9
 - A MongoDB Atlas account (or local MongoDB)
 - A Google Gemini API key
+- A Google Drive API KEY
+- Email Notifications (via SMTP)
 
 ---
 
@@ -153,7 +155,16 @@ PORT=3000
 MONGODB_URI=<your Atlas connection string>
 JWT_SECRET=<strong random string>
 GEMINI_API_KEY=<your Gemini key>
+GOOGLE_DRIVE_API_KEY="AIzaSyAZVsFPxZVM3EEcvS1pwRNzsMlWlUzWeYE"
 CLIENT_ORIGIN=https://your-frontend.vercel.app
+
+# ─── Email / SMTP (optional) ──────────────────────────────────────────────────
+# Leave blank to disable email features — the app will still run fine
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=<your-email@gmail.com>
+SMTP_PASS=<your-gmail-app-password>
+SMTP_FROM=TalentScreen <noreply@yourcompany.com>
 ```
 
 4. Set **Build Command** to `npm install && npm run build` and **Start Command** to `npm start`.
@@ -172,7 +183,7 @@ VITE_API_BASE_URL=https://your-backend.onrender.com/api
 
 #### Post-deployment checklist
 
-- [ ] Run `npx ts-node scripts/seedUsers.ts` against the production DB to create judge accounts
+- [ ] Run `npx ts-node scripts/seedUsers.ts` or `npm run seed` against the production DB to create accounts
 - [ ] Test login with judge credentials
 - [ ] Create a job
 - [ ] Upload a PDF resume and verify it parses correctly
@@ -251,8 +262,6 @@ The previous screening results for that job are **deleted** before the new resul
 ### Limitations
 
 - **No self-registration:** Accounts are created by seeding. This is intentional for an internal HR tool — an admin provisions accounts.
-- **No resume deduplication:** The same candidate uploaded twice creates two records.
-- **No token refresh:** An expired token requires the user to log out and back in.
 - **File size limit:** Express body parser is limited to 10MB.
 - **No pagination:** All candidates and results are returned in a single API call.
 
