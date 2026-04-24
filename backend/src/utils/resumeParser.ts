@@ -23,6 +23,7 @@ import mammoth from "mammoth";
 import { createWorker } from "tesseract.js";
 import * as cheerio from "cheerio";
 import logger from "./logger";
+import { isGoogleDriveUrl, fetchGoogleDriveFile } from "./googleDriveClient";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -131,8 +132,15 @@ export async function extractTextFromBuffer(
 }
 
 export async function extractTextFromUrl(url: string): Promise<string> {
-  // Resolve Google Drive share links to direct download links
-  const resolvedUrl = resolveGoogleDriveUrl(url);
+  // ── Google Drive / Docs URLs → use Drive API v3 (reliable, no auth-wall) ──
+  if (isGoogleDriveUrl(url)) {
+    logger.info(`[extractTextFromUrl] Google Drive URL detected — using Drive API: ${url}`);
+    const { buffer, mimeType, filename } = await fetchGoogleDriveFile(url);
+    return extractTextFromBuffer(buffer, mimeType, filename);
+  }
+
+  // ── All other URLs → existing fetch + scrape logic ────────────────────────
+  const resolvedUrl = resolveGoogleDriveUrl(url); // no-op for non-Drive URLs
 
   const response = await fetch(resolvedUrl, {
     redirect: "follow",
