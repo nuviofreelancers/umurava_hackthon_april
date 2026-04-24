@@ -1,26 +1,38 @@
 /**
- * aiService.ts — Gemini-only AI service
+ * aiService.gem-groq.ts — Gemini-primary with automatic Groq fallback
+ *
+ * Strategy:
+ *   - Every call attempts Gemini first (better quality, supports URL reading)
+ *   - If Gemini fails (503, 429, network error, or key missing) → falls back to Groq
+ *   - If both fail → throws a combined error
+ *   - readLink() always uses Gemini (Groq cannot browse URLs)
+ *
+ * SETUP:
+ *   Set at least one of these in your .env:
+ *     GEMINI_API_KEY=...   (primary)
+ *     GROQ_API_KEY=...     (fallback)
+ *   Both is ideal. Either one alone will work.
  *
  * Responsibilities:
- *   1. extractCV(text)      — Structure raw resume text into the ExtractedCV schema
- *   2. validateCV(parsed)   — Fact-check an already-parsed CV object for red flags
- *   3. readLink(url)        — Fetch & extract a CV from a Google Drive / Docs / any URL
- *   4. screenAI(...)        — Rank and score candidates against a job spec
- *
- * Pipeline for file uploads:  parser → extractCV() → validateCV()
- * Pipeline for link uploads:  readLink() [fetches + extracts in one shot] → validateCV()
+ *   1. extractCV(text)    — Structure raw resume text into the ExtractedCV schema
+ *   2. validateCV(parsed) — Fact-check a parsed CV for red flags
+ *   3. readLink(url)      — Fetch & extract a CV from a URL (Gemini only)
+ *   4. screenAI(...)      — Rank and score candidates against a job spec
  */
 
 import logger from "../utils/logger";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models";
-const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const GEMINI_API_URL     = "https://generativelanguage.googleapis.com/v1beta/models";
+const GEMINI_MODEL       = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const GEMINI_MAX_RETRIES = 3;
+const GEMINI_DELAYS_MS   = [3000, 8000, 15000];
 
-// 1 initial attempt + up to 4 retries = 5 total
-const MAX_RETRIES = 4;
-const RETRY_DELAYS_MS = [3000, 8000, 15000, 25000];
+const GROQ_API_URL      = "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_MODEL        = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+const GROQ_MAX_RETRIES  = 2;
+const GROQ_DELAYS_MS    = [1000, 4000];
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
 
@@ -108,47 +120,30 @@ export interface ScreeningResultAI {
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
-/**
- * Pulls the top-level JSON object or array out of a string.
- * Prefers objects over arrays (screenAI returns { "results": [...] }).
- * Handles prose preambles and markdown fences from the model.
- */
 function extractJSON(text: string): string {
-  // Strip markdown fences (handles ```json ... ``` and ``` ... ```)
-  const stripped = text
-    .replace(/^```(?:json)?\s*/im, "")
-    .replace(/\s*```$/im, "")
-    .trim();
-
-  const objMatch = stripped.match(/\{[\s\S]*\}/);
-  const arrMatch = stripped.match(/\[[\s\S]*\]/);
-
-  if (objMatch && arrMatch) {
-    // Return whichever container starts earlier in the string (the outer one)
-    return (objMatch.index! <= arrMatch.index! ? objMatch[0] : arrMatch[0]).trim();
-  }
-  return (objMatch?.[0] ?? arrMatch?.[0] ?? stripped).trim();
+  const stripped = text.replace(/^```(?:json)?\s*/im, "").replace(/\s*```$/im, "").trim();
+  const match = stripped.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
+  return match ? match[0].trim() : stripped;
 }
 
-// ─── Gemini API caller ────────────────────────────────────────────────────────
+// ─── Gemini caller ────────────────────────────────────────────────────────────
 
-async function callGemini(prompt: string, maxTokens = 8192): Promise<string> {
+async function callGemini(prompt: string): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not set in environment");
+  if (!apiKey) throw new Error("GEMINI_API_KEY not set");
 
-  let lastError: Error = new Error("Gemini call failed after all retries");
+  let lastError: Error = new Error("Gemini failed");
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt <= GEMINI_MAX_RETRIES; attempt++) {
     if (attempt > 0) {
-      const delay = RETRY_DELAYS_MS[attempt - 1] ?? 30000;
-      logger.warn(`[Gemini] retry ${attempt}/${MAX_RETRIES} — waiting ${delay}ms`);
+      const delay = GEMINI_DELAYS_MS[attempt - 1] ?? 20000;
+      logger.warn(`[gem-groq][Gemini] retry ${attempt}/${GEMINI_MAX_RETRIES} — waiting ${delay}ms`);
       await new Promise((r) => setTimeout(r, delay));
     }
 
-    let res: Response;
     try {
-      res = await fetch(
-        `${GEMINI_API_URL}/${MODEL}:generateContent?key=${apiKey}`,
+      const res = await fetch(
+        `${GEMINI_API_URL}/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -158,8 +153,7 @@ async function callGemini(prompt: string, maxTokens = 8192): Promise<string> {
               temperature: 0.1,
               topK: 40,
               topP: 0.95,
-              maxOutputTokens: maxTokens,
-              responseMimeType: "application/json",
+              maxOutputTokens: 8192,
             },
             safetySettings: [
               { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
@@ -168,39 +162,123 @@ async function callGemini(prompt: string, maxTokens = 8192): Promise<string> {
           }),
         }
       );
-    } catch (networkErr) {
-      lastError = networkErr instanceof Error ? networkErr : new Error(String(networkErr));
-      logger.warn(`[Gemini] network error on attempt ${attempt + 1}: ${lastError.message}`);
-      continue;
+
+      if (res.status === 503 || res.status === 429) {
+        lastError = new Error(`Gemini ${res.status} — overloaded/rate-limited`);
+        logger.warn(`[gem-groq][Gemini] ${res.status} on attempt ${attempt + 1}`);
+        continue;
+      }
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new Error(`Gemini API error ${res.status}: ${body}`);
+      }
+
+      const data = await res.json() as any;
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      if (!text) throw new Error("Gemini returned empty response");
+
+      logger.info(`[gem-groq][Gemini] ✅ success on attempt ${attempt + 1}`);
+      return text;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt === GEMINI_MAX_RETRIES) break;
+    }
+  }
+  throw lastError;
+}
+
+// ─── Groq caller ──────────────────────────────────────────────────────────────
+
+async function callGroq(prompt: string): Promise<string> {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error("GROQ_API_KEY not set");
+
+  let lastError: Error = new Error("Groq failed");
+
+  for (let attempt = 0; attempt <= GROQ_MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delay = GROQ_DELAYS_MS[attempt - 1] ?? 8000;
+      logger.warn(`[gem-groq][Groq] retry ${attempt}/${GROQ_MAX_RETRIES} — waiting ${delay}ms`);
+      await new Promise((r) => setTimeout(r, delay));
     }
 
-    if (res.status === 503 || res.status === 429) {
-      lastError = new Error(`Gemini ${res.status} — service overloaded or rate-limited`);
-      logger.warn(`[Gemini] ${res.status} on attempt ${attempt + 1}/${MAX_RETRIES + 1}`);
-      continue;
+    try {
+      const res = await fetch(GROQ_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: GROQ_MODEL,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.1,
+          max_tokens: 8192,
+          response_format: { type: "json_object" },
+        }),
+      });
+
+      if (res.status === 429 || res.status === 503) {
+        lastError = new Error(`Groq ${res.status} — rate limited`);
+        continue;
+      }
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new Error(`Groq error ${res.status}: ${body}`);
+      }
+
+      const data = await res.json() as any;
+      const text = data.choices?.[0]?.message?.content ?? "";
+      if (!text) throw new Error("Groq returned empty response");
+
+      logger.info(`[gem-groq][Groq] ✅ success on attempt ${attempt + 1}`);
+      return text;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt === GROQ_MAX_RETRIES) break;
     }
+  }
+  throw lastError;
+}
 
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`Gemini API error ${res.status}: ${body}`);
+// ─── Unified fallback orchestrator ────────────────────────────────────────────
+
+type Provider = "gemini" | "groq";
+
+async function callWithFallback(
+  prompt: string,
+  context: string,
+  groqNeedsResultsWrapper = false
+): Promise<{ text: string; provider: Provider }> {
+  // Try Gemini first
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const text = await callGemini(prompt);
+      return { text, provider: "gemini" };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(`[gem-groq] Gemini failed for ${context}: ${msg} — falling back to Groq`);
     }
-
-    const data = await res.json() as {
-      candidates?: Array<{
-        content?: { parts?: Array<{ text?: string }> };
-        finishReason?: string;
-      }>;
-    };
-
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-    if (!text) throw new Error("Gemini returned an empty response body");
-
-    logger.info(`[Gemini] success on attempt ${attempt + 1}`);
-    return text;
+  } else {
+    logger.info(`[gem-groq] No GEMINI_API_KEY — going straight to Groq for ${context}`);
   }
 
-  logger.error(`[Gemini] failed after ${MAX_RETRIES + 1} attempts: ${lastError.message}`);
-  throw lastError;
+  // Groq fallback
+  if (!process.env.GROQ_API_KEY) {
+    throw new Error("Both Gemini and Groq are unavailable — set GEMINI_API_KEY and/or GROQ_API_KEY in .env");
+  }
+
+  // Groq's json_object mode requires a top-level object, not an array.
+  // For calls that return arrays, we wrap in {"results":[...]} and unwrap on parse.
+  let groqPrompt = prompt;
+  if (groqNeedsResultsWrapper) {
+    groqPrompt += `\n\nGROQ NOTE: Your response must be a JSON object. Wrap the candidates array like this: {"results": [...]}`;
+  }
+
+  const text = await callGroq(groqPrompt);
+  return { text, provider: "groq" };
 }
 
 // ─── Shared prompt fragments ──────────────────────────────────────────────────
@@ -245,65 +323,26 @@ const CV_SCHEMA = `{
 }`;
 
 const CV_FIELD_RULES = `
-FIELD-BY-FIELD RULES (read carefully — every rule is enforced):
-
-NAME
-- Extract first_name, last_name, full_name separately.
-- If no clear human name exists → {"error":"not_a_resume"}.
-
-EMAIL / PHONE
-- Email → lowercase. Phone → preserve country code if present.
-- Absent → omit entirely. Never fabricate.
-
-LOCATION — format: "City, Country". City only if country is absent. Omit if unclear.
-
-HEADLINE
-- Only generate if you have at least a role AND one skill to reference.
-- Format: "[Seniority] [Role] specializing in [Skill1] and [Skill2]"
-- Sparse profile → omit.
-
-BIO
-- Requires at minimum 3 distinct verifiable facts (role + skills + exp length OR education).
-- Exactly 2 sentences. Factual only — no "passionate", "dynamic", "results-driven".
-- Fewer than 3 facts → omit entirely.
-
-EXPERIENCE_YEARS
-- Sum non-overlapping date ranges from the experience array. Round to nearest 0.5.
-- No dates anywhere in the resume → omit entirely. Do NOT estimate.
-
-SKILLS
-- Extract only skills explicitly named in the text (tools, languages, frameworks, methodologies).
-- Do NOT infer skills from job titles or company names alone.
-- Level rules (use the LOWEST that fits the evidence):
-    "Expert"       → explicitly called expert/lead/architect, OR 5+ years stated for that skill
-    "Advanced"     → 3–5 years stated, OR senior-level role context clearly tied to that skill
-    "Intermediate" → 1–3 years stated, OR clearly used regularly in a described role
-    "Beginner"     → learning/trainee/exposure/< 1 year mentioned
-    OMIT level     → zero evidence of proficiency — do NOT default to Intermediate
-- yearsOfExperience: only if a specific number is stated for that exact skill. Omit otherwise.
-
-EXPERIENCE ENTRIES
-- Minimum: company name OR role title must be present.
-- startDate / endDate: format "YYYY-MM". Use "Present" for current role. Missing date → omit that field, never guess.
-- description: only real descriptive text from the resume — do NOT summarise the title.
-- technologies: only items explicitly named in that specific job entry.
-
-EDUCATION
-- Minimum: institution name OR degree name.
-- Degree normalisation: PhD/Doctorate→"PhD" | Master/MSc/MBA/MEng→"Master" | Bachelor/BSc/BA/BEng→"Bachelor" | Associate→"Associate" | Diploma/HND/High School/Secondary→"High School"
-- startYear / endYear: only explicit year numbers. Never infer.
-- education_level: pick the highest degree level found.
-
-CERTIFICATIONS / PROJECTS
-- Only explicitly named. Do not infer from skills or experience descriptions.
-- Projects: include link only if a URL literally appears in the text.
-
-SOCIAL LINKS / PORTFOLIO
-- Only URLs literally present in the text. Never construct or guess from the person's name.
-
-AVAILABILITY
-- Default to { "status": "Available", "type": "Full-time" } ONLY if nothing contradicts it.
-- "not looking" / "currently employed, not seeking" → "Not Available".
+NAME: Extract first_name, last_name, full_name. No name found → {"error":"not_a_resume"}.
+EMAIL/PHONE: Email → lowercase. Phone → preserve country code. Absent → omit.
+LOCATION: "City, Country". City only if country absent. Unclear → omit.
+HEADLINE: Only if role + skill both exist. Format: "[Seniority] [Role] specializing in [Skill1] and [Skill2]".
+BIO: Only with ≥3 distinct facts. Exactly 2 factual sentences. No opinions or filler. Fewer facts → omit.
+EXPERIENCE_YEARS: Sum non-overlapping date ranges. Round to 0.5. No dates anywhere → omit.
+SKILLS: Only explicitly named tools/languages/frameworks. Level rules (use lowest that fits):
+  "Expert" → explicitly stated, or 5+ yrs for that skill.
+  "Advanced" → 3–5 yrs or senior context tied to that skill.
+  "Intermediate" → 1–3 yrs or regular use in a role.
+  "Beginner" → learning/trainee/exposure/<1 yr.
+  OMIT level → zero evidence. Do NOT default to Intermediate.
+  yearsOfExperience → only if explicitly stated for that exact skill.
+EXPERIENCE ENTRIES: Minimum company OR role. startDate/endDate → "YYYY-MM" or "Present". Missing → omit that date.
+  description → real descriptive text only, not a paraphrase of the title.
+  technologies → only items explicitly named in that specific job entry.
+EDUCATION: Degree normalisation: PhD/Doctorate→"PhD" | Master/MSc/MBA/MEng→"Master" | Bachelor/BSc/BA/BEng→"Bachelor" | Associate→"Associate" | Diploma/HND/High School→"High School". education_level = highest degree found.
+CERTIFICATIONS/PROJECTS: Only explicitly named. Projects: include link only if URL literally appears in text.
+SOCIAL LINKS: Only URLs literally in the text. Never construct from person's name.
+AVAILABILITY: Default {"status":"Available","type":"Full-time"} unless text contradicts it.
 `.trim();
 
 // ─── 1. extractCV ─────────────────────────────────────────────────────────────
@@ -314,52 +353,39 @@ AVAILABILITY
  */
 export async function extractCV(text: string): Promise<ExtractedCV> {
   const prompt = `
-You are a senior HR data engineer. Your sole task: extract structured data from resume text.
-You never invent, embellish, or pad. When data is absent, you omit the field — silence over noise.
+You are a senior HR data engineer. Extract structured JSON data from resume text.
+Never invent, embellish, or pad. Omit fields when data is absent.
 
-══════════════════════════════════════════════
 STEP 1 — IS THIS A RESUME?
-══════════════════════════════════════════════
-Ask: does this text belong to a specific person and describe their professional history?
+Does the text belong to a specific person and describe their professional history?
+NOT a resume: navigation-heavy pages, articles, job descriptions, LinkedIn feeds, or no personal info.
+If NOT a resume → return exactly: {"error":"not_a_resume"}
+If unsure → return {"error":"not_a_resume"} — rejecting is safer than hallucinating.
 
-NOT a resume if: navigation links dominate, it's a news article, a job description,
-a LinkedIn feed, random scraped web content, or there is no personal info.
+STEP 2 — HARD RULES
+R1. Return ONLY a raw JSON object. No markdown, no backticks, no prose.
+R2. Omit any field with no real data. Never use null, "", "N/A", "Unknown", or placeholders.
+R3. Never invent, assume, or infer anything not explicitly written.
+R4. Illegible or garbled section → omit entirely.
 
-If NOT a resume → output exactly this JSON and nothing else:
-{"error":"not_a_resume"}
-
-If you are unsure → output {"error":"not_a_resume"}. Rejecting is safer than hallucinating.
-
-══════════════════════════════════════════════
-STEP 2 — HARD RULES (override everything else)
-══════════════════════════════════════════════
-R1. Output ONLY raw JSON. No markdown, no backticks, no prose, no explanations.
-R2. Omit any field you have no real data for. Never use null, "", "N/A", "Unknown", or placeholders.
-R3. Never invent, assume, or infer anything not explicitly written in the text.
-R4. Illegible or garbled section → omit that entire section.
-
-══════════════════════════════════════════════
 STEP 3 — FIELD RULES
-══════════════════════════════════════════════
 ${CV_FIELD_RULES}
 
-══════════════════════════════════════════════
 STEP 4 — OUTPUT SCHEMA (omit keys with no real data)
-══════════════════════════════════════════════
 ${CV_SCHEMA}
 
-══════════════════════════════════════════════
-RESUME TEXT
-══════════════════════════════════════════════
+RESUME TEXT:
 ${text.slice(0, 12000)}
 `.trim();
 
-  const raw = await callGemini(prompt);
+  const { text: raw, provider } = await callWithFallback(prompt, "extractCV", false);
   const clean = extractJSON(raw);
   try {
-    return JSON.parse(clean) as ExtractedCV;
+    const result = JSON.parse(clean) as ExtractedCV;
+    logger.info(`[gem-groq] extractCV complete via ${provider}`);
+    return result;
   } catch (err) {
-    logger.error("[Gemini] extractCV parse failed:", clean.slice(0, 500));
+    logger.error(`[gem-groq][${provider}] extractCV parse failed:`, clean.slice(0, 500));
     throw new Error("AI returned malformed JSON during CV extraction");
   }
 }
@@ -369,11 +395,8 @@ ${text.slice(0, 12000)}
 /**
  * Fact-checks a structured ExtractedCV object for implausible, inconsistent,
  * or suspicious data. Runs AFTER extractCV (or after manual parsers).
- *
- * Does NOT re-extract data — only audits what is already there.
  */
 export async function validateCV(parsed: ExtractedCV): Promise<CVValidationResult> {
-  // Skip validation if the CV was already rejected upstream
   if (parsed.error === "not_a_resume") {
     return {
       is_valid: false,
@@ -384,51 +407,50 @@ export async function validateCV(parsed: ExtractedCV): Promise<CVValidationResul
   }
 
   const prompt = `
-You are a senior recruitment auditor with expertise in detecting fraudulent or implausible CVs.
-You are given a structured CV object (already parsed from a resume). Your job is to fact-check it.
+You are a senior recruitment auditor. You are given a structured CV object (already parsed).
+Your job: fact-check it for red flags. Return a JSON validation report.
 
-You are NOT re-extracting data. You are auditing what is already there for:
-  - Implausible values (e.g. experience_years: 40 for someone who graduated in 2020)
-  - Internal inconsistencies (e.g. endYear before startYear, current role at a company listed as ended)
-  - Suspicious inflation (e.g. 15 Expert-level skills with only 2 years total experience)
-  - Missing critical fields (a CV with no name, no skills, and no experience is useless)
-  - Date logic errors (overlapping roles that sum to more years than the person's career span)
-  - Skill level vs experience_years mismatch (Expert in React with 6 months total experience is suspicious)
+CHECK FOR:
+- Implausible values (e.g. experience_years: 40 for someone who graduated in 2020)
+- Internal inconsistencies (endYear before startYear, current role listed as ended)
+- Suspicious skill inflation (15 Expert-level skills with only 2 years total experience)
+- Missing critical fields (no name + no skills + no experience = useless record)
+- Date logic errors (overlapping roles summing to more years than career span)
+- Skill level vs experience_years mismatch (Expert in React with 6 months total experience)
 
-IMPORTANT RULES:
+RULES:
 - Only flag genuine problems. Do NOT flag stylistic choices or optional missing fields.
-- A CV with 3 skills and 1 job entry is sparse but may still be valid for a junior candidate — do not flag unless something is actively wrong.
-- Be proportionate. A single suspicious skill level is a low-severity flag; a date that makes someone born before the internet "Expert" in React is high-severity.
-- is_valid should be false ONLY if there are dealbreaker flags (e.g. no identity info at all, dates that are logically impossible, or evidence of fabrication).
-- confidence reflects how complete and credible the profile is overall, NOT match quality.
+- A sparse CV (3 skills, 1 job) may be valid for a junior — only flag if something is actively wrong.
+- is_valid = false ONLY for dealbreaker flags (impossible dates, no identity info, fabrication evidence).
+- confidence reflects overall completeness and credibility, NOT match quality.
+- Empty flags array [] if no issues found.
 
 PARSED CV:
 ${JSON.stringify(parsed, null, 2).slice(0, 8000)}
 
-Return ONLY this JSON structure — no prose, no markdown, no backticks:
+Return ONLY this JSON structure (no prose, no markdown):
 {
   "is_valid": true,
   "confidence": "High | Medium | Low",
   "flags": [
     {
-      "field": "experience_years",
+      "field": "string (e.g. experience_years, skills[2].level)",
       "issue": "implausible | inconsistent | suspicious | missing_critical",
-      "detail": "Specific human-readable explanation of what is wrong"
+      "detail": "Specific human-readable explanation"
     }
   ],
   "overall_note": "One sentence summary of the CV's credibility"
 }
-
-If there are no issues: return flags as an empty array [] and is_valid as true.
 `.trim();
 
-  const raw = await callGemini(prompt);
+  const { text: raw, provider } = await callWithFallback(prompt, "validateCV", false);
   const clean = extractJSON(raw);
   try {
-    return JSON.parse(clean) as CVValidationResult;
+    const result = JSON.parse(clean) as CVValidationResult;
+    logger.info(`[gem-groq] validateCV complete via ${provider}`);
+    return result;
   } catch (err) {
-    logger.error("[Gemini] validateCV parse failed:", clean.slice(0, 500));
-    // Return a safe fallback — don't block the whole upload on a validation parse failure
+    logger.error(`[gem-groq] validateCV parse failed:`, clean.slice(0, 500));
     return {
       is_valid: true,
       confidence: "Low",
@@ -448,16 +470,17 @@ If there are no issues: return flags as an empty array [] and is_valid as true.
  * Reads a resume from a URL (Google Drive, Google Docs, Dropbox, personal site, etc.)
  * and returns a structured ExtractedCV.
  *
- * This replaces the parser stage entirely for link-based uploads.
- * Gemini is instructed to first describe what it found at the URL,
- * then extract structured data if it is a resume.
+ * ALWAYS uses Gemini — Groq/Llama cannot browse URLs.
+ * If Gemini is unavailable, this throws rather than silently returning garbage.
  *
- * Note: Gemini cannot truly "browse" arbitrary URLs, but it handles
- * Google Drive share links and publicly accessible document URLs well
- * via its URL-context capability. For Drive links, ensure the document
- * is set to "Anyone with the link can view".
+ * For Google Drive: ensure the document is set to "Anyone with the link can view".
  */
 export async function readLink(url: string): Promise<ExtractedCV> {
+  if (!process.env.GEMINI_API_KEY) {
+    logger.error("[gem-groq] readLink requires GEMINI_API_KEY — Groq cannot browse URLs");
+    throw new Error("Link-based CV reading requires Gemini. Set GEMINI_API_KEY in your .env.");
+  }
+
   const prompt = `
 You are a senior HR data engineer. A candidate has submitted the following URL as their resume:
 ${url}
@@ -468,31 +491,28 @@ Your task:
 3. If it is a resume → extract and return structured data following the rules below.
 4. If it is NOT a resume (broken link, login wall, job description, article, etc.) → return {"error":"not_a_resume"}.
 
-══════════════════════════════════════════════
 HARD RULES
-══════════════════════════════════════════════
-R1. Output ONLY raw JSON. No markdown, no backticks, no prose.
-R2. Omit any field you have no real data for. Never use null, "", "N/A", "Unknown".
+R1. Return ONLY a raw JSON object. No markdown, no backticks, no prose.
+R2. Omit any field with no real data. Never use null, "", "N/A", "Unknown".
 R3. Never invent, assume, or infer anything not in the document.
 R4. If the link requires a login or is inaccessible → {"error":"not_a_resume"}.
 
-══════════════════════════════════════════════
 FIELD RULES
-══════════════════════════════════════════════
 ${CV_FIELD_RULES}
 
-══════════════════════════════════════════════
 OUTPUT SCHEMA (omit keys with no real data)
-══════════════════════════════════════════════
 ${CV_SCHEMA}
 `.trim();
 
+  // readLink always goes to Gemini directly — no fallback to Groq
   const raw = await callGemini(prompt);
   const clean = extractJSON(raw);
   try {
-    return JSON.parse(clean) as ExtractedCV;
+    const result = JSON.parse(clean) as ExtractedCV;
+    logger.info(`[gem-groq] readLink complete via Gemini for: ${url.slice(0, 80)}`);
+    return result;
   } catch (err) {
-    logger.error("[Gemini] readLink parse failed:", clean.slice(0, 500));
+    logger.error("[gem-groq] readLink parse failed:", clean.slice(0, 500));
     throw new Error("AI returned malformed JSON while reading resume link");
   }
 }
@@ -520,7 +540,6 @@ export async function screenAI(
 ): Promise<ScreeningResultAI[]> {
   if (applicants.length === 0) return [];
 
-  // Normalise weights to sum to 100
   const total = weights.skills + weights.experience + weights.education + weights.relevance;
   const w = {
     skills:     Math.round((weights.skills / total) * 100),
@@ -530,7 +549,7 @@ export async function screenAI(
   };
 
   const limitInstruction = shortlistSize
-    ? `IMPORTANT: Evaluate ALL ${applicants.length} candidate(s), but return ONLY the top ${shortlistSize} in the final JSON array, ranked by match_score descending.`
+    ? `IMPORTANT: Evaluate ALL ${applicants.length} candidate(s), but return ONLY the top ${shortlistSize} in the results array, ranked by match_score descending.`
     : `Evaluate and return results for all ${applicants.length} candidate(s).`;
 
   const candidateSummaries = applicants.map((a) => {
@@ -587,8 +606,8 @@ Languages: ${langSummary || "—"}`.trim();
   }).join("\n\n---\n\n");
 
   const prompt = `
-You are TalentScreen's AI talent evaluator — an objective, evidence-based recruiter.
-You evaluate candidates strictly on merit. You do not make assumptions. You do not award points for data that is not present.
+You are TalentScreen's AI talent evaluator — objective, evidence-based, no biases.
+Evaluate candidates strictly on merit. Do not award points for absent data.
 
 ${limitInstruction}
 
@@ -607,80 +626,33 @@ ${job.description.slice(0, 2000)}
 ══════════════════════════════════════════════
 SCORING SYSTEM
 ══════════════════════════════════════════════
-Score each of the four dimensions 0–100 using the rubrics below.
-Then compute:
-  match_score = (skills_score × ${w.skills} + experience_score × ${w.experience} + education_score × ${w.education} + relevance_score × ${w.relevance}) / 100
-Round match_score to nearest integer.
+match_score = (skills_score × ${w.skills} + experience_score × ${w.experience} + education_score × ${w.education} + relevance_score × ${w.relevance}) / 100
+Round to nearest integer.
 
-SKILLS (${w.skills}% weight)
-  100 = All required skills present at Advanced/Expert + most preferred skills
-  80  = All required skills present
-  60  = Most required skills (missing 1–2 minor ones)
-  40  = Partial — has transferable or adjacent skills
-  20  = Few relevant skills
-  0   = Missing all required skills
-  ⚠ If skills section is entirely absent → skills_score: 0
-
-EXPERIENCE (${w.experience}% weight)
-  100 = Direct role match at exact seniority, measurable impact in descriptions
-  80  = Highly relevant domain, appropriate years
-  60  = Adjacent domain or slightly under/over-qualified
-  40  = Transferable but significant domain gap
-  20  = Very limited relevant experience
-  0   = Irrelevant background or no experience data
-  ⚠ If experience section is entirely absent → experience_score: 0
-
-EDUCATION (${w.education}% weight)
-  100 = Exact degree + field match for this role
-  80  = Correct level, adjacent field
-  60  = Different level but compensated by strong experience
-  40  = Unrelated degree
-  0   = No formal education data (strong experience CAN compensate — use judgment)
-  ⚠ If education section is entirely absent → education_score: 0
-
-RELEVANCE (${w.relevance}% weight)
-  100 = Ideal domain/culture/location fit — zero ramp-up needed
-  80  = Strong fit with minor gaps
-  60  = Reasonable fit, 1–2 misalignments (location, availability, domain)
-  40  = Needs significant onboarding
-  0   = Poor overall fit
+SKILLS (${w.skills}%): 100=all required+most preferred | 80=all required | 60=missing 1–2 minor | 40=adjacent | 20=few | 0=none or absent section.
+EXPERIENCE (${w.experience}%): 100=direct role match exact seniority | 80=highly relevant | 60=adjacent/off-level | 40=transferable | 20=minimal | 0=irrelevant or absent.
+EDUCATION (${w.education}%): 100=exact degree+field | 80=correct level adj field | 60=different level+strong exp | 40=unrelated | 0=no data.
+RELEVANCE (${w.relevance}%): 100=ideal fit zero ramp-up | 80=strong minor gaps | 60=reasonable 1–2 misalignments | 40=needs onboarding | 0=poor fit.
 
 ══════════════════════════════════════════════
 OUTPUT RULES
 ══════════════════════════════════════════════
 1. Return a JSON object with key "results" containing the ranked array.
-2. applicant_id MUST exactly match the CANDIDATE_ID for each candidate — do not alter it.
-3. Rank starts at 1 (best match). No two candidates share the same rank.
+2. applicant_id MUST exactly match the CANDIDATE_ID — do not alter it.
+3. Rank starts at 1 (best match). No ties.
+4. strengths: evidence-only. Name specific skills/roles/tools. Sparse → max 1 strength or ["Insufficient profile data"].
+   NEVER: "good communicator", "team player", "passionate", or traits not backed by data.
+5. gaps: specific. "Missing Python experience" ✓ | "Lacks technical skills" ✗.
+   "dealbreaker" = explicitly required + cannot be quickly learned.
+   "nice-to-have" = preferred or minor misalignment.
+6. confidence_level (data quality, NOT match quality):
+   "High" = skills + ≥2 experience entries with descriptions + education
+   "Medium" = missing one major section
+   "Low" = sparse (<3 skills, no experience detail) → add gap: {"description":"Sparse profile — recommend manual review","type":"nice-to-have"}
+7. recommendation: "Strong Yes"(≥82+no dealbreaker+High/Medium) | "Yes"(≥68+no dealbreaker) | "Maybe"(≥50 or Low conf) | "No"(<50 or dealbreaker).
+8. bias_flags: flag non-merit scoring influences. [] if none.
 
-4. strengths — evidence-only rules:
-   - Only cite strengths directly evidenced by profile data.
-   - Name the specific skill, role, company, project, or tool you are referencing.
-   - Sparse profile (< 3 skills, no experience detail) → maximum 1 strength, or use: ["Insufficient profile data to assess strengths"]
-   - NEVER write: "good communicator", "team player", "fast learner", "passionate", or any trait not backed by data.
-
-5. gaps — specificity rules:
-   - Name the exact missing required skill or experience gap.
-   - "Missing Python experience" ✓ | "Lacks technical skills" ✗
-   - If experience_years is materially below the job level, note both the candidate's years and what the job implies.
-   - type "dealbreaker" = explicitly required by the job spec and cannot be quickly learned.
-   - type "nice-to-have" = preferred skill or minor misalignment.
-
-6. confidence_level — reflects profile data quality, NOT match quality:
-   "High"   = skills list + ≥ 2 experience entries with descriptions + education
-   "Medium" = missing one major section (e.g. no experience descriptions, no education)
-   "Low"    = sparse — fewer than 3 skills, no experience detail, or mostly blank
-              → automatically add a gap: {"description": "Sparse profile — scores are estimates; recommend manual review", "type": "nice-to-have"}
-
-7. recommendation thresholds:
-   "Strong Yes" = match_score ≥ 82 AND no dealbreaker gaps AND confidence High or Medium
-   "Yes"        = match_score ≥ 68 AND no dealbreaker gaps
-   "Maybe"      = match_score ≥ 50 OR recoverable gaps OR confidence Low
-   "No"         = match_score < 50 OR has dealbreaker gaps
-
-8. bias_flags: flag any scoring influence from non-merit factors (gender-coded language, career gaps,
-   institution prestige, non-English names, nationality, age signals). Empty array [] if none found.
-
-REQUIRED JSON FORMAT:
+REQUIRED FORMAT:
 {
   "results": [
     {
@@ -694,7 +666,7 @@ REQUIRED JSON FORMAT:
       "relevance_score": 0,
       "confidence_level": "High",
       "recommendation": "Yes",
-      "strengths": ["specific, evidence-backed strength"],
+      "strengths": ["evidence-backed strength"],
       "gaps": [{ "description": "specific gap", "type": "nice-to-have" }],
       "bias_flags": []
     }
@@ -707,9 +679,9 @@ CANDIDATES TO EVALUATE
 ${candidateSummaries}
 `.trim();
 
-  // screenAI responses can be large (many candidates × detailed output) — use a higher token budget
-  const raw = await callGemini(prompt, 16384);
+  const { text: raw, provider } = await callWithFallback(prompt, `screenAI(${job.title})`, true);
   const clean = extractJSON(raw);
+
   try {
     const parsed = JSON.parse(clean);
     const results: ScreeningResultAI[] = Array.isArray(parsed)
@@ -719,11 +691,10 @@ ${candidateSummaries}
     if (!Array.isArray(results)) throw new Error("Screening response is not an array");
 
     const finalResults = shortlistSize ? results.slice(0, shortlistSize) : results;
-    logger.info(`[Gemini] screenAI complete — evaluated ${applicants.length}, returning ${finalResults.length}`);
+    logger.info(`[gem-groq] screenAI complete via ${provider} — evaluated ${applicants.length}, returning ${finalResults.length}`);
     return finalResults;
   } catch (err) {
-    logger.error("[Gemini] screenAI parse failed (first 2000 chars):", clean.slice(0, 2000));
-    logger.error("[Gemini] screenAI parse failed (last 500 chars):", clean.slice(-500));
+    logger.error(`[gem-groq] screenAI parse failed:`, clean.slice(0, 500));
     throw new Error("AI returned malformed JSON during screening");
   }
 }
