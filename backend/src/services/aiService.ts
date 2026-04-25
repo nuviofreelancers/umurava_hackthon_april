@@ -499,80 +499,64 @@ ${CV_SCHEMA}
 
 // ─── 4. screenAI ──────────────────────────────────────────────────────────────
 
-/**
- * Ranks and scores a list of candidates against a job spec.
- * Returns results sorted by rank (1 = best match).
- */
-export async function screenAI(
-  job: {
-    _id: string;
-    title: string;
-    description: string;
-    required_skills: string[];
-    preferred_skills: string[];
-    experience_level: string;
-    employment_type: string;
-    department: string;
-  },
-  applicants: Array<any>,
-  weights: ScreeningWeights,
-  shortlistSize?: number
-): Promise<ScreeningResultAI[]> {
-  if (applicants.length === 0) return [];
+// Max candidates per Gemini request — keeps output well within token limits on both free and paid tiers
+const SCREENING_BATCH_SIZE = 10;
 
-  // Normalise weights to sum to 100
-  const total = weights.skills + weights.experience + weights.education + weights.relevance;
-  const w = {
-    skills:     Math.round((weights.skills / total) * 100),
-    experience: Math.round((weights.experience / total) * 100),
-    education:  Math.round((weights.education / total) * 100),
-    relevance:  Math.round((weights.relevance / total) * 100),
-  };
+// Max batches to run simultaneously — 2 is safe for free tier (10 RPM), faster for paid
+const SCREENING_CONCURRENCY = 2;
 
-  const limitInstruction = shortlistSize
-    ? `IMPORTANT: Evaluate ALL ${applicants.length} candidate(s), but return ONLY the top ${shortlistSize} in the final JSON array, ranked by match_score descending.`
-    : `Evaluate and return results for all ${applicants.length} candidate(s).`;
+type ScreeningJob = {
+  _id: string;
+  title: string;
+  description: string;
+  required_skills: string[];
+  preferred_skills: string[];
+  experience_level: string;
+  employment_type: string;
+  department: string;
+};
 
-  const candidateSummaries = applicants.map((a) => {
-    const skillNames = (a.skills ?? [])
-      .map((s: any) =>
-        typeof s === "string"
-          ? s
-          : `${s.name}${s.level ? ` (${s.level})` : ""}${s.yearsOfExperience ? ` ${s.yearsOfExperience}yr` : ""}`
-      )
-      .join(", ");
+/** Builds a compact but complete candidate summary string for the screening prompt. */
+function buildCandidateSummary(a: any): string {
+  const skillNames = (a.skills ?? [])
+    .map((s: any) =>
+      typeof s === "string"
+        ? s
+        : `${s.name}${s.level ? ` (${s.level})` : ""}${s.yearsOfExperience ? ` ${s.yearsOfExperience}yr` : ""}`
+    )
+    .join(", ");
 
-    const expSummary = (a.experience ?? [])
-      .slice(0, 5)
-      .map((e: any) =>
-        `${e.role} @ ${e.company} [${e.startDate ?? "?"}–${e.endDate ?? "Present"}]` +
-        `${e.technologies?.length ? ` | Tech: ${e.technologies.slice(0, 5).join(", ")}` : ""}` +
-        `${e.description ? ` | ${e.description.slice(0, 120)}` : ""}`
-      )
-      .join("\n      ");
+  const expSummary = (a.experience ?? [])
+    .slice(0, 5)
+    .map((e: any) =>
+      `${e.role} @ ${e.company} [${e.startDate ?? "?"}–${e.endDate ?? "Present"}]` +
+      `${e.technologies?.length ? ` | Tech: ${e.technologies.slice(0, 5).join(", ")}` : ""}` +
+      `${e.description ? ` | ${e.description.slice(0, 120)}` : ""}`
+    )
+    .join("\n      ");
 
-    const eduSummary = (a.education ?? [])
-      .map((e: any) =>
-        `${e.degree}${e.fieldOfStudy ? ` in ${e.fieldOfStudy}` : ""} @ ${e.institution}` +
-        `${e.endYear ? ` (${e.endYear})` : ""}`
-      )
-      .join("; ");
+  const eduSummary = (a.education ?? [])
+    .map((e: any) =>
+      `${e.degree}${e.fieldOfStudy ? ` in ${e.fieldOfStudy}` : ""} @ ${e.institution}` +
+      `${e.endYear ? ` (${e.endYear})` : ""}`
+    )
+    .join("; ");
 
-    const certSummary = (a.certifications ?? []).map((c: any) => c.name).join(", ");
+  const certSummary = (a.certifications ?? []).map((c: any) => c.name).join(", ");
 
-    const projSummary = (a.projects ?? [])
-      .slice(0, 3)
-      .map((p: any) =>
-        `${p.name}${p.technologies?.length ? ` [${p.technologies.slice(0, 4).join(", ")}]` : ""}` +
-        `${p.description ? `: ${p.description.slice(0, 80)}` : ""}`
-      )
-      .join(" | ");
+  const projSummary = (a.projects ?? [])
+    .slice(0, 3)
+    .map((p: any) =>
+      `${p.name}${p.technologies?.length ? ` [${p.technologies.slice(0, 4).join(", ")}]` : ""}` +
+      `${p.description ? `: ${p.description.slice(0, 80)}` : ""}`
+    )
+    .join(" | ");
 
-    const langSummary = (a.languages ?? [])
-      .map((l: any) => `${l.name} (${l.proficiency})`)
-      .join(", ");
+  const langSummary = (a.languages ?? [])
+    .map((l: any) => `${l.name} (${l.proficiency})`)
+    .join(", ");
 
-    return `
+  return `
 CANDIDATE_ID: ${a._id}
 Name: ${a.full_name ?? "Unknown"} | Headline: ${a.headline ?? "—"}
 Location: ${a.location ?? "—"} | Availability: ${a.availability?.status ?? "Unknown"} ${a.availability?.type ?? ""}
@@ -584,13 +568,27 @@ Education: ${eduSummary || "—"}
 Certifications: ${certSummary || "—"}
 Projects: ${projSummary || "—"}
 Languages: ${langSummary || "—"}`.trim();
-  }).join("\n\n---\n\n");
+}
+
+/**
+ * Runs a single Gemini screening request for one batch of ≤10 candidates.
+ * Ranks within the response are local to this batch and will be reassigned
+ * globally once all batches are merged.
+ */
+async function runScreeningBatch(
+  job: ScreeningJob,
+  batch: Array<any>,
+  w: { skills: number; experience: number; education: number; relevance: number },
+  batchIndex: number,
+  totalBatches: number
+): Promise<ScreeningResultAI[]> {
+  const candidateSummaries = batch.map(buildCandidateSummary).join("\n\n---\n\n");
 
   const prompt = `
 You are TalentScreen's AI talent evaluator — an objective, evidence-based recruiter.
 You evaluate candidates strictly on merit. You do not make assumptions. You do not award points for data that is not present.
 
-${limitInstruction}
+Evaluate and return results for all ${batch.length} candidate(s) in this batch.
 
 ══════════════════════════════════════════════
 JOB SPECIFICATION
@@ -650,7 +648,7 @@ OUTPUT RULES
 ══════════════════════════════════════════════
 1. Return a JSON object with key "results" containing the ranked array.
 2. applicant_id MUST exactly match the CANDIDATE_ID for each candidate — do not alter it.
-3. Rank starts at 1 (best match). No two candidates share the same rank.
+3. Rank starts at 1 (best match) within this batch. No two candidates share the same rank.
 
 4. strengths — evidence-only rules:
    - Only cite strengths directly evidenced by profile data.
@@ -707,8 +705,13 @@ CANDIDATES TO EVALUATE
 ${candidateSummaries}
 `.trim();
 
-  // screenAI responses can be large (many candidates × detailed output) — use a higher token budget
   const raw = await callGemini(prompt, 16384);
+
+  if (!raw || raw.trim().length < 10) {
+    logger.error(`[Gemini] screenAI batch ${batchIndex + 1}/${totalBatches} got blank response`);
+    throw new Error(`AI returned an empty response for screening batch ${batchIndex + 1}`);
+  }
+
   const clean = extractJSON(raw);
   try {
     const parsed = JSON.parse(clean);
@@ -718,12 +721,76 @@ ${candidateSummaries}
 
     if (!Array.isArray(results)) throw new Error("Screening response is not an array");
 
-    const finalResults = shortlistSize ? results.slice(0, shortlistSize) : results;
-    logger.info(`[Gemini] screenAI complete — evaluated ${applicants.length}, returning ${finalResults.length}`);
-    return finalResults;
+    logger.info(`[Gemini] screenAI batch ${batchIndex + 1}/${totalBatches} complete — ${results.length} result(s)`);
+    return results;
   } catch (err) {
-    logger.error("[Gemini] screenAI parse failed (first 2000 chars):", clean.slice(0, 2000));
-    logger.error("[Gemini] screenAI parse failed (last 500 chars):", clean.slice(-500));
-    throw new Error("AI returned malformed JSON during screening");
+    logger.error(`[Gemini] screenAI batch ${batchIndex + 1} parse failed (first 2000 chars):`, clean.slice(0, 2000));
+    logger.error(`[Gemini] screenAI batch ${batchIndex + 1} parse failed (last 500 chars):`, clean.slice(-500));
+    throw new Error(`AI returned malformed JSON for screening batch ${batchIndex + 1}`);
   }
+}
+
+/**
+ * Ranks and scores a list of candidates against a job spec.
+ * Splits into batches of 10, runs up to 2 in parallel, then merges
+ * and globally re-ranks all results by match_score descending.
+ * Returns results sorted by rank (1 = best match).
+ */
+export async function screenAI(
+  job: ScreeningJob,
+  applicants: Array<any>,
+  weights: ScreeningWeights,
+  shortlistSize?: number
+): Promise<ScreeningResultAI[]> {
+  if (applicants.length === 0) return [];
+
+  // Normalise weights to sum to 100
+  const total = weights.skills + weights.experience + weights.education + weights.relevance;
+  const w = {
+    skills:     Math.round((weights.skills / total) * 100),
+    experience: Math.round((weights.experience / total) * 100),
+    education:  Math.round((weights.education / total) * 100),
+    relevance:  Math.round((weights.relevance / total) * 100),
+  };
+
+  // Split candidates into batches of SCREENING_BATCH_SIZE
+  const batches: Array<any[]> = [];
+  for (let i = 0; i < applicants.length; i += SCREENING_BATCH_SIZE) {
+    batches.push(applicants.slice(i, i + SCREENING_BATCH_SIZE));
+  }
+
+  logger.info(
+    `[Gemini] screenAI — ${applicants.length} candidate(s) across ${batches.length} batch(es), ` +
+    `concurrency=${Math.min(SCREENING_CONCURRENCY, batches.length)}`
+  );
+
+  // Process batches in windows of SCREENING_CONCURRENCY (parallel within each window, sequential across windows)
+  const allResults: ScreeningResultAI[] = [];
+  for (let i = 0; i < batches.length; i += SCREENING_CONCURRENCY) {
+    const window = batches.slice(i, i + SCREENING_CONCURRENCY);
+    const settled = await Promise.allSettled(
+      window.map((batch, j) => runScreeningBatch(job, batch, w, i + j, batches.length))
+    );
+
+    for (const outcome of settled) {
+      if (outcome.status === "fulfilled") {
+        allResults.push(...outcome.value);
+      } else {
+        // One batch failed — log and continue so surviving batch results aren't discarded
+        logger.error("[Gemini] screenAI batch failed:", (outcome.reason as Error)?.message ?? outcome.reason);
+      }
+    }
+  }
+
+  if (allResults.length === 0) {
+    throw new Error("All screening batches failed — no results returned");
+  }
+
+  // Globally re-rank all merged results by match_score descending
+  allResults.sort((a, b) => b.match_score - a.match_score);
+  allResults.forEach((r, idx) => { r.rank = idx + 1; });
+
+  const finalResults = shortlistSize ? allResults.slice(0, shortlistSize) : allResults;
+  logger.info(`[Gemini] screenAI complete — evaluated ${applicants.length}, returning ${finalResults.length}`);
+  return finalResults;
 }
