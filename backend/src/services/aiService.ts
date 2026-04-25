@@ -190,10 +190,26 @@ async function callGemini(prompt: string, maxTokens = 8192): Promise<string> {
         content?: { parts?: Array<{ text?: string }> };
         finishReason?: string;
       }>;
+      promptFeedback?: { blockReason?: string };
     };
 
+    // Warn on non-STOP finish reasons — MAX_TOKENS means the response was cut off mid-JSON
+    const finishReason = data.candidates?.[0]?.finishReason;
+    if (finishReason && finishReason !== "STOP") {
+      logger.warn(`[Gemini] finishReason=${finishReason} on attempt ${attempt + 1} — response may be truncated`);
+    }
+
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-    if (!text) throw new Error("Gemini returned an empty response body");
+    if (!text) {
+      // Log the full raw shape so we can see exactly what Gemini returned
+      logger.error(`[Gemini] empty text on attempt ${attempt + 1} — raw response:`, JSON.stringify(data).slice(0, 1000));
+      // If Gemini blocked the prompt, throw immediately — retrying won't help
+      if (data.promptFeedback?.blockReason) {
+        throw new Error(`Gemini blocked prompt: ${data.promptFeedback.blockReason}`);
+      }
+      lastError = new Error("Gemini returned an empty response body");
+      continue; // retry — could be a transient issue or input too large for this attempt
+    }
 
     logger.info(`[Gemini] success on attempt ${attempt + 1}`);
     return text;
@@ -499,10 +515,10 @@ ${CV_SCHEMA}
 
 // ─── 4. screenAI ──────────────────────────────────────────────────────────────
 
-// Max candidates per Gemini request — keeps output well within token limits on both free and paid tiers
-const SCREENING_BATCH_SIZE = 10;
+// 7 candidates per batch — safely within free tier input token limits for detailed profiles
+const SCREENING_BATCH_SIZE = 7;
 
-// Max batches to run simultaneously — 2 is safe for free tier (10 RPM), faster for paid
+// Run up to 2 batches simultaneously — safe for free tier (10 RPM), faster for paid
 const SCREENING_CONCURRENCY = 2;
 
 type ScreeningJob = {
@@ -571,9 +587,8 @@ Languages: ${langSummary || "—"}`.trim();
 }
 
 /**
- * Runs a single Gemini screening request for one batch of ≤10 candidates.
- * Ranks within the response are local to this batch and will be reassigned
- * globally once all batches are merged.
+ * Runs a single Gemini screening request for one batch of ≤7 candidates.
+ * Ranks in the response are local to this batch and reassigned globally after merging.
  */
 async function runScreeningBatch(
   job: ScreeningJob,
@@ -732,7 +747,7 @@ ${candidateSummaries}
 
 /**
  * Ranks and scores a list of candidates against a job spec.
- * Splits into batches of 10, runs up to 2 in parallel, then merges
+ * Splits into batches of 7, runs up to 2 in parallel, then merges
  * and globally re-ranks all results by match_score descending.
  * Returns results sorted by rank (1 = best match).
  */
@@ -764,12 +779,12 @@ export async function screenAI(
     `concurrency=${Math.min(SCREENING_CONCURRENCY, batches.length)}`
   );
 
-  // Process batches in windows of SCREENING_CONCURRENCY (parallel within each window, sequential across windows)
+  // Process batches in windows of SCREENING_CONCURRENCY (parallel within each window, sequential across)
   const allResults: ScreeningResultAI[] = [];
   for (let i = 0; i < batches.length; i += SCREENING_CONCURRENCY) {
-    const window = batches.slice(i, i + SCREENING_CONCURRENCY);
+    const windowBatches = batches.slice(i, i + SCREENING_CONCURRENCY);
     const settled = await Promise.allSettled(
-      window.map((batch, j) => runScreeningBatch(job, batch, w, i + j, batches.length))
+      windowBatches.map((batch, j) => runScreeningBatch(job, batch, w, i + j, batches.length))
     );
 
     for (const outcome of settled) {
@@ -794,3 +809,5 @@ export async function screenAI(
   logger.info(`[Gemini] screenAI complete — evaluated ${applicants.length}, returning ${finalResults.length}`);
   return finalResults;
 }
+
+
