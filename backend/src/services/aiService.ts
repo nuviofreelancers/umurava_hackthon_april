@@ -515,8 +515,8 @@ ${CV_SCHEMA}
 
 // ─── 4. screenAI ──────────────────────────────────────────────────────────────
 
-// 7 candidates per batch — safely within free tier input token limits for detailed profiles
-const SCREENING_BATCH_SIZE = 7;
+// 5 candidates per batch — tighter input trimming keeps each batch well under free tier token limits
+const SCREENING_BATCH_SIZE = 5;
 
 // Run up to 2 batches simultaneously — safe for free tier (10 RPM), faster for paid
 const SCREENING_CONCURRENCY = 2;
@@ -532,58 +532,51 @@ type ScreeningJob = {
   department: string;
 };
 
-/** Builds a compact but complete candidate summary string for the screening prompt. */
+/** Builds a compact candidate summary string for the screening prompt. */
 function buildCandidateSummary(a: any): string {
   const skillNames = (a.skills ?? [])
     .map((s: any) =>
       typeof s === "string"
         ? s
-        : `${s.name}${s.level ? ` (${s.level})` : ""}${s.yearsOfExperience ? ` ${s.yearsOfExperience}yr` : ""}`
+        : `${s.name}${s.level ? ` (${s.level})` : ""}`
     )
     .join(", ");
 
   const expSummary = (a.experience ?? [])
-    .slice(0, 5)
+    .slice(0, 3)
     .map((e: any) =>
       `${e.role} @ ${e.company} [${e.startDate ?? "?"}–${e.endDate ?? "Present"}]` +
-      `${e.technologies?.length ? ` | Tech: ${e.technologies.slice(0, 5).join(", ")}` : ""}` +
-      `${e.description ? ` | ${e.description.slice(0, 120)}` : ""}`
+      `${e.technologies?.length ? ` | ${e.technologies.slice(0, 3).join(", ")}` : ""}` +
+      `${e.description ? ` | ${e.description.slice(0, 60)}` : ""}`
     )
     .join("\n      ");
 
   const eduSummary = (a.education ?? [])
+    .slice(0, 2)
     .map((e: any) =>
       `${e.degree}${e.fieldOfStudy ? ` in ${e.fieldOfStudy}` : ""} @ ${e.institution}` +
       `${e.endYear ? ` (${e.endYear})` : ""}`
     )
     .join("; ");
 
-  const certSummary = (a.certifications ?? []).map((c: any) => c.name).join(", ");
-
   const projSummary = (a.projects ?? [])
-    .slice(0, 3)
+    .slice(0, 2)
     .map((p: any) =>
-      `${p.name}${p.technologies?.length ? ` [${p.technologies.slice(0, 4).join(", ")}]` : ""}` +
-      `${p.description ? `: ${p.description.slice(0, 80)}` : ""}`
+      `${p.name}${p.technologies?.length ? ` [${p.technologies.slice(0, 3).join(", ")}]` : ""}` +
+      `${p.description ? `: ${p.description.slice(0, 40)}` : ""}`
     )
     .join(" | ");
 
-  const langSummary = (a.languages ?? [])
-    .map((l: any) => `${l.name} (${l.proficiency})`)
-    .join(", ");
-
   return `
 CANDIDATE_ID: ${a._id}
-Name: ${a.full_name ?? "Unknown"} | Headline: ${a.headline ?? "—"}
-Location: ${a.location ?? "—"} | Availability: ${a.availability?.status ?? "Unknown"} ${a.availability?.type ?? ""}
-Total Experience: ${a.experience_years ?? "?"} yrs | Education Level: ${a.education_level ?? "—"}
+Name: ${a.full_name ?? "Unknown"} | ${a.headline ? a.headline.slice(0, 60) : "—"}
+Location: ${a.location ?? "—"} | ${a.availability?.status ?? "Unknown"} ${a.availability?.type ?? ""}
+Experience: ${a.experience_years ?? "?"}yrs | Education: ${a.education_level ?? "—"}
 Skills: ${skillNames || "—"}
 Work History:
   ${expSummary || "—"}
 Education: ${eduSummary || "—"}
-Certifications: ${certSummary || "—"}
-Projects: ${projSummary || "—"}
-Languages: ${langSummary || "—"}`.trim();
+Projects: ${projSummary || "—"}`.trim();
 }
 
 /**
@@ -692,6 +685,12 @@ OUTPUT RULES
 
 8. bias_flags: flag any scoring influence from non-merit factors (gender-coded language, career gaps,
    institution prestige, non-English names, nationality, age signals). Empty array [] if none found.
+
+9. OUTPUT LENGTH — strictly enforced to prevent truncation:
+   - strengths: max 2 items, max 12 words each
+   - gaps: max 2 items, max 12 words each
+   - bias_flags: max 1 item if any, otherwise []
+   - applicant_name: first and last name only
 
 REQUIRED JSON FORMAT:
 {
