@@ -92,7 +92,7 @@
         "Paused",
         "Closed"
       ],
-      "default": "Draft",
+      "default": "Active",
       "description": "Job posting status"
     },
     "screening_weights": {

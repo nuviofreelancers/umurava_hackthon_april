@@ -4,7 +4,7 @@ import Applicant from "../models/Applicant";
 import Job from "../models/Job";
 import ScreeningResult, { IGap } from "../models/ScreeningResult";
 import { AuthRequest } from "../middlewares/authMiddleware";
-import { screenAI, ScreeningResultAI } from "../services/aiService";
+import { screenAI, matchCandidateToRoles, ScreeningResultAI } from "../services/aiService";
 import logger from "../utils/logger";
 
 function isValidId(id: string): boolean {
@@ -43,7 +43,12 @@ export async function runScreening(req: AuthRequest, res: Response, next: NextFu
       return;
     }
 
-    const weightTotal = (weights.skills ?? 0) + (weights.experience ?? 0) + (weights.education ?? 0) + (weights.relevance ?? 0);
+    const weightTotal =
+      (weights.skills ?? 0) +
+      (weights.experience ?? 0) +
+      (weights.education ?? 0) +
+      (weights.relevance ?? 0);
+
     if (weightTotal <= 0) {
       res.status(400).json({ message: "Screening weights must sum to a positive number" });
       return;
@@ -64,9 +69,20 @@ export async function runScreening(req: AuthRequest, res: Response, next: NextFu
       return;
     }
 
-    logger.info(`Running AI screening for job "${job.title}" — ${applicants.length} candidates`);
+    // ── Fetch other published jobs for lateral matching ───────────────────────
+    // We pull all other active jobs owned by this user — excluding the one being screened.
+    // These are what we'll match each candidate against after primary screening.
+    const otherJobs = await Job.find({
+      userId: req.user!.id,
+      _id: { $ne: job_id },
+      status: "Active",
+    }).select("_id title description required_skills preferred_skills experience_level");
 
-    // Call Gemini
+    logger.info(
+      `Running AI screening for job "${job.title}" — ${applicants.length} candidates, ${otherJobs.length} other jobs for lateral matching`
+    );
+
+    // ── Primary screening ─────────────────────────────────────────────────────
     const aiResults: ScreeningResultAI[] = await screenAI(
       {
         _id:              job.id,
@@ -97,26 +113,70 @@ export async function runScreening(req: AuthRequest, res: Response, next: NextFu
       shortlistSize
     );
 
-    // Delete old results and insert fresh ones atomically
+    // ── Lateral role matching ─────────────────────────────────────────────────
+    // Run matchCandidateToRoles for each screened candidate in parallel.
+    // Only fires if there are other published jobs to match against.
+    // Non-fatal — if matching fails for a candidate, they just get [] and
+    // primary screening results are still saved normally.
+    let roleMatchMap: Record<string, Awaited<ReturnType<typeof matchCandidateToRoles>>> = {};
+
+    if (otherJobs.length > 0) {
+      const matchPromises = aiResults.map(async (r) => {
+        const applicant = applicants.find((a) => a.id === r.applicant_id);
+        if (!applicant) return { applicant_id: r.applicant_id, matches: [] };
+
+        try {
+          const matches = await matchCandidateToRoles(
+            applicant,
+            otherJobs.map((j) => ({
+              _id:              j.id,
+              title:            j.title,
+              description:      j.description,
+              required_skills:  j.required_skills ?? [],
+              preferred_skills: j.preferred_skills ?? [],
+              experience_level: j.experience_level,
+            }))
+          );
+          return { applicant_id: r.applicant_id, matches };
+        } catch (err) {
+          logger.warn(`[matchCandidateToRoles] failed for applicant ${r.applicant_id} — skipping`, err);
+          return { applicant_id: r.applicant_id, matches: [] };
+        }
+      });
+
+      const matchResults = await Promise.all(matchPromises);
+      roleMatchMap = Object.fromEntries(
+        matchResults.map(({ applicant_id, matches }) => [applicant_id, matches])
+      );
+
+      const totalSuggestions = Object.values(roleMatchMap).reduce((sum, m) => sum + m.length, 0);
+      logger.info(`[matchCandidateToRoles] complete — ${totalSuggestions} role suggestion(s) across ${aiResults.length} candidates`);
+    } else {
+      logger.info("[matchCandidateToRoles] skipped — no other published jobs in this account");
+    }
+
+    // ── Delete old results and insert fresh ones ──────────────────────────────
     await ScreeningResult.deleteMany({ job_id });
 
     const docs = aiResults
       .filter((r) => isValidId(r.applicant_id))
       .map((r) => ({
-        job_id:           job_id,
-        applicant_id:     r.applicant_id,
-        applicant_name:   r.applicant_name,
-        rank:             r.rank,
-        match_score:      Math.round(Math.min(100, Math.max(0, r.match_score))),
-        skills_score:     Math.round(Math.min(100, Math.max(0, r.skills_score ?? 0))),
-        experience_score: Math.round(Math.min(100, Math.max(0, r.experience_score ?? 0))),
-        education_score:  Math.round(Math.min(100, Math.max(0, r.education_score ?? 0))),
-        relevance_score:  Math.round(Math.min(100, Math.max(0, r.relevance_score ?? 0))),
-        confidence_level: r.confidence_level ?? "Medium",
-        recommendation:   r.recommendation ?? "Maybe",
-        strengths:        Array.isArray(r.strengths) ? r.strengths : [],
-        gaps:             normalizeGaps(r.gaps),
-        bias_flags:       Array.isArray(r.bias_flags) ? r.bias_flags : [],
+        job_id:                job_id,
+        applicant_id:          r.applicant_id,
+        applicant_name:        r.applicant_name,
+        rank:                  r.rank,
+        match_score:           Math.round(Math.min(100, Math.max(0, r.match_score))),
+        skills_score:          Math.round(Math.min(100, Math.max(0, r.skills_score ?? 0))),
+        experience_score:      Math.round(Math.min(100, Math.max(0, r.experience_score ?? 0))),
+        education_score:       Math.round(Math.min(100, Math.max(0, r.education_score ?? 0))),
+        relevance_score:       Math.round(Math.min(100, Math.max(0, r.relevance_score ?? 0))),
+        confidence_level:      r.confidence_level ?? "Medium",
+        recommendation:        r.recommendation ?? "Maybe",
+        strengths:             Array.isArray(r.strengths) ? r.strengths : [],
+        gaps:                  normalizeGaps(r.gaps),
+        bias_flags:            Array.isArray(r.bias_flags) ? r.bias_flags : [],
+        // ── NEW: attach lateral role matches for this candidate ──
+        other_matching_roles:  roleMatchMap[r.applicant_id] ?? [],
       }));
 
     const inserted = await ScreeningResult.insertMany(docs);
@@ -162,7 +222,6 @@ export async function deleteResultsByJob(req: AuthRequest, res: Response, next: 
       res.status(400).json({ message: "Invalid job ID" });
       return;
     }
-    // Only delete results belonging to jobs owned by this user
     const job = await Job.findOne({ _id: jobId, userId: req.user!.id });
     if (!job) { res.status(404).json({ message: "Job not found" }); return; }
     const result = await ScreeningResult.deleteMany({ job_id: jobId });

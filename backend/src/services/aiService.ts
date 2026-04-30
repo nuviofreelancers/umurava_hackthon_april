@@ -1,16 +1,3 @@
-/**
- * aiService.ts — Gemini-only AI service
- *
- * Responsibilities:
- *   1. extractCV(text)      — Structure raw resume text into the ExtractedCV schema
- *   2. validateCV(parsed)   — Fact-check an already-parsed CV object for red flags
- *   3. readLink(url)        — Fetch & extract a CV from a Google Drive / Docs / any URL
- *   4. screenAI(...)        — Rank and score candidates against a job spec
- *
- * Pipeline for file uploads:  parser → extractCV() → validateCV()
- * Pipeline for link uploads:  readLink() [fetches + extracts in one shot] → validateCV()
- */
-
 import logger from "../utils/logger";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -810,3 +797,157 @@ export async function screenAI(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// INSTRUCTIONS: Paste this entire block at the BOTTOM of your aiService.ts,
+// just before the final closing line (if any). No other files need changing
+// on the backend side for this function — it uses the existing callGemini()
+// and extractJSON() helpers already in that file.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─── 5. matchCandidateToRoles ─────────────────────────────────────────────────
+//
+// Lightweight lateral match: scores one already-screened candidate against
+// N other active jobs in the system (i.e. jobs they did NOT apply to).
+//
+// Uses a single fast Gemini call — no batching, no weighted sub-scores.
+// Only returns roles where estimated fit >= ROLE_MATCH_THRESHOLD (80).
+//
+// Designed to be called AFTER a candidate has been screened so the profile
+// is enriched and the AI has something solid to evaluate against.
+
+const ROLE_MATCH_THRESHOLD = 80;
+
+export interface RoleMatch {
+  job_id: string;
+  job_title: string;
+  estimated_score: number;
+  match_reason: string; // one short sentence — specific, evidence-backed
+}
+
+/**
+ * Scores a single candidate profile against a list of OTHER active jobs.
+ * Returns only matches >= 80%. Safe to call in parallel with other operations.
+ *
+ * @param candidate  - Full applicant object (same shape used by screenAI)
+ * @param otherJobs  - Active jobs to evaluate, EXCLUDING the one applied to
+ */
+export async function matchCandidateToRoles(
+  candidate: any,
+  otherJobs: Array<{
+    _id: string;
+    id?: string;
+    title: string;
+    description: string;
+    required_skills: string[];
+    preferred_skills?: string[];
+    experience_level?: string;
+  }>
+): Promise<RoleMatch[]> {
+  if (!otherJobs || otherJobs.length === 0) return [];
+
+  // ── Compact candidate summary (mirrors buildCandidateSummary from screenAI) ─
+  const skillNames = (candidate.skills ?? [])
+    .map((s: any) =>
+      typeof s === "string" ? s : `${s.name}${s.level ? ` (${s.level})` : ""}`
+    )
+    .join(", ");
+
+  const expSummary = (candidate.experience ?? [])
+    .slice(0, 3)
+    .map(
+      (e: any) =>
+        `${e.role} @ ${e.company} [${e.startDate ?? "?"}–${e.endDate ?? "Present"}]` +
+        `${e.description ? ` | ${e.description.slice(0, 80)}` : ""}`
+    )
+    .join("\n  ");
+
+  const candidateSummary = `
+Name:         ${candidate.full_name ?? "Unknown"}
+Current Role: ${candidate.current_role ?? "—"} at ${candidate.current_company ?? "—"}
+Experience:   ${candidate.experience_years ?? "?"}yrs
+Education:    ${candidate.education_level ?? "—"}
+Skills:       ${skillNames || "—"}
+Work History:
+  ${expSummary || "—"}
+`.trim();
+
+  // ── Compact job list ──────────────────────────────────────────────────────
+  const jobList = otherJobs
+    .map((j, i) => {
+      const id = j._id || j.id;
+      return `JOB_${i + 1}:
+  ID:               ${id}
+  Title:            ${j.title}
+  Level:            ${j.experience_level ?? "Not specified"}
+  Required Skills:  ${(j.required_skills ?? []).join(", ") || "Not specified"}
+  Preferred Skills: ${(j.preferred_skills ?? []).join(", ") || "None"}
+  Description:      ${j.description?.slice(0, 300) ?? "—"}`;
+    })
+    .join("\n\n");
+
+  const prompt = `
+You are TalentScreen's lateral fit evaluator.
+A candidate has already been screened for one role. Your job: quickly estimate
+how well they fit OTHER open roles in the same system.
+
+Be strict. Only score 80+ if the candidate's actual skills and experience
+genuinely satisfy the job's required skills. Do not be generous or speculative.
+
+THRESHOLD RULE: Only include a job if estimated_score >= ${ROLE_MATCH_THRESHOLD}.
+If NO jobs meet the threshold, return an empty array [].
+
+══════════════════════════════════════════════
+CANDIDATE PROFILE
+══════════════════════════════════════════════
+${candidateSummary}
+
+══════════════════════════════════════════════
+OTHER OPEN ROLES TO EVALUATE
+══════════════════════════════════════════════
+${jobList}
+
+══════════════════════════════════════════════
+OUTPUT RULES
+══════════════════════════════════════════════
+1. Return ONLY a raw JSON array. No markdown, no prose, no backticks.
+2. Only include jobs with estimated_score >= ${ROLE_MATCH_THRESHOLD}.
+3. match_reason: one sentence (max 15 words), citing a specific skill or experience.
+4. job_id MUST exactly match the ID shown in the job listing above.
+5. If no jobs qualify → return exactly: []
+
+FORMAT:
+[
+  {
+    "job_id": "<exact ID>",
+    "job_title": "<title>",
+    "estimated_score": 85,
+    "match_reason": "4 years of React and TypeScript directly satisfies the required stack."
+  }
+]
+`.trim();
+
+  const raw = await callGemini(prompt, 2048);
+  const clean = extractJSON(raw);
+
+  try {
+    const parsed = JSON.parse(clean);
+    const matches: RoleMatch[] = Array.isArray(parsed)
+      ? parsed
+      : (parsed.results ?? []);
+
+    // Client-side safety filter — enforce threshold even if model ignores it
+    return matches.filter(
+      (m) =>
+        typeof m.job_id === "string" &&
+        typeof m.estimated_score === "number" &&
+        m.estimated_score >= ROLE_MATCH_THRESHOLD
+    );
+  } catch (err) {
+    logger.error(
+      "[Gemini] matchCandidateToRoles parse failed:",
+      clean.slice(0, 500)
+    );
+    // Non-fatal — return empty rather than crashing the screening flow
+    return [];
+  }
+}
