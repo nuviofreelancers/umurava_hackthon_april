@@ -104,6 +104,19 @@ export const interviews = {
   }) => request<unknown>(`/applicants/${applicantId}/interview`, { method: "PUT", body: JSON.stringify(data) }),
   cancel: (applicantId: string) =>
     request<unknown>(`/applicants/${applicantId}/interview/cancel`, { method: "PUT" }),
+  notify: (data: {
+    applicant_id: string;
+    applicant_name: string;
+    applicant_email: string;
+    job_title: string;
+    interview_type: "online" | "offline";
+    interview_date: string;
+    interview_time: string;
+    interview_link?: string;
+    interview_location?: string;
+    interview_notes?: string;
+    reminder_at: string;
+  }) => request<{ success: boolean }>("/interviews/notify", { method: "POST", body: JSON.stringify(data) }),
 };
 
 // ─── File Upload ──────────────────────────────────────────────────────────────

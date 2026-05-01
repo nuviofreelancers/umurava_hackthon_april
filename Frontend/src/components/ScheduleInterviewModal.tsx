@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { applicants as applicantsApi } from "@/api/backend";
+import { applicants as applicantsApi, interviews as interviewsApi } from "@/api/backend";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -60,31 +60,19 @@ export default function ScheduleInterviewModal({ applicant, jobTitle, onClose, o
       // We surface a warning toast on failure, but do NOT block the success flow
       // since the interview record is already saved.
       try {
-        const token = localStorage.getItem("hr_token");
-        const notifyRes = await fetch("/api/interviews/notify", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({
-            applicant_id:       applicant.id,
-            applicant_name:     applicant.full_name,
-            applicant_email:    applicant.email,
-            job_title:          jobTitle,
-            interview_type:     interviewType,           // "online" | "offline"
-            interview_date:     form.interview_date,     // "YYYY-MM-DD"
-            interview_time:     form.interview_time,     // "HH:MM"
-            interview_link:     form.interview_link,
-            interview_location: form.interview_location,
-            interview_notes:    form.interview_notes,
-            reminder_at:        reminderDateTime.toISOString(),
-          }),
+        await interviewsApi.notify({
+          applicant_id:       applicant.id,
+          applicant_name:     applicant.full_name,
+          applicant_email:    applicant.email,
+          job_title:          jobTitle,
+          interview_type:     interviewType,
+          interview_date:     form.interview_date,
+          interview_time:     form.interview_time,
+          interview_link:     form.interview_link,
+          interview_location: form.interview_location,
+          interview_notes:    form.interview_notes,
+          reminder_at:        reminderDateTime.toISOString(),
         });
-
-        if (!notifyRes.ok) {
-          throw new Error(`notify endpoint returned ${notifyRes.status}`);
-        }
       } catch (emailErr) {
         // Interview is saved — just warn that email failed
         console.warn("Interview notification email failed:", emailErr);
